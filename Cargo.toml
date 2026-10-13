@@ -1,0 +1,8 @@
+[package]
+name = "go-parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chumsky = "0.13.0"
+gosyn = {"git"="https://github.com/Isaac-leonard/gosyn", rev = "d9c1a11564c57c2797f7085e324315a884492412"}
