@@ -3,8 +3,8 @@ pub mod name_resolution;
 use std::collections::{HashMap, hash_map::Entry};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use gosyn::ast::InterfaceType;
 use gosyn::ast::{Declaration, File, Import, InstantiatedType, StructType};
+use gosyn::ast::{FuncDecl, InterfaceType};
 use name_resolution::Context;
 
 fn main() {
@@ -67,7 +67,7 @@ fn convert_decl(decl: &Declaration, context: &mut Context) -> Result<String, Str
             }
             Ok(types)
         }
-        Declaration::Function(func_decl) => todo!(),
+        Declaration::Function(func_decl) => Ok(convert_function(func_decl)),
         Declaration::Const(decl) => todo!(),
         Declaration::Variable(decl) => todo!(),
     }
@@ -228,6 +228,109 @@ fn convert_struct(name: &str, typ: &StructType) -> WithExtraTypes {
     WithExtraTypes { typ, extras }
 }
 
+pub fn convert_function(func: &FuncDecl) -> String {
+    let name = &func.name.name;
+    let type_params = vec![];
+    let mut extras = vec![];
+    for arg in &func.typ.typ_params {
+        let WithExtraTypes {
+            typ,
+            extras: arg_extras,
+        } = unimplemented![]; // convert_unnamed_type(&arg.constraint);
+        extras.extend(arg_extras);
+        for name in &arg.name {
+            let name = &name.name;
+            type_params.push(format!("{name}: {typ}"));
+        }
+    }
+
+    let type_params = if !type_params.is_empty() {
+        let types = type_params.join(", ");
+        format!("<{types}>")
+    } else {
+        String::new()
+    };
+
+    let mut params = vec![];
+    for param in &func.typ.params.parameters {
+        let WithExtraTypes {
+            typ,
+            extras: param_extras,
+        } = convert_unnamed_type(&param.typ);
+        extras.extend(param_extras);
+
+        match param.identifiers.as_slice() {
+            [] => {
+                // We convert variadic parameters into vectors for now
+                if param.variadic.is_some() {
+                    params.push(format!("_: Vec<{typ}>"));
+                } else {
+                    params.push(format!("_: {typ}"));
+                }
+            }
+            [name] => {
+                let name = &name.name;
+                // We convert variadic parameters into vectors for now
+                if param.variadic.is_some() {
+                    params.push(format!("{name}: Vec<{typ}>"));
+                } else {
+                    params.push(format!("{name}: {typ}"));
+                }
+            }
+            names => {
+                for (index, name) in names.iter().enumerate() {
+                    let name = &name.name;
+                    // We convert variadic parameters into vectors for now
+                    if param.variadic.is_some() && index == names.len() - 1 {
+                        params.push(format!("{name}: Vec<{typ}>"));
+                    } else {
+                        params.push(format!("{name}: {typ}"));
+                    }
+                }
+            }
+        };
+    }
+
+    let params = params.join(", ");
+
+    let mut result = vec![];
+
+    for res in &func.typ.result.parameters {
+        let WithExtraTypes {
+            typ,
+            extras: res_extras,
+        } = convert_unnamed_type(&res.typ);
+        extras.extend(res_extras);
+        // unnamed
+        if res.identifiers.is_empty() {
+            result.push(typ.clone());
+        } else {
+            for _name in &res.identifiers {
+                result.push(typ.clone());
+            }
+        }
+    }
+
+    let result = match result.as_slice() {
+        [] => String::new(),
+        [res] => format!("->{res}"),
+        res => {
+            let res = res.join(", ");
+            format!("->({res})")
+        }
+    };
+
+    if let Some(body) = &func.body {
+        let mut statements: Vec<String> = vec![];
+        for stmt in &body.list {
+            unimplemented![];
+        }
+        format!("fn {name}{type_params}({params}){result}{{}}")
+    } else {
+        format!("unsafe extern \"C\" {{fn {name}{type_params}({params}){result};}}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use gosyn::Parser;
@@ -347,5 +450,113 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "struct test{\ni64: i64,\nsecond: t::second<third>,\n}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_no_params_or_result() {
+        let func_src = "package main;\nfunc test () {}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(){}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_single_named_params_and_no_result() {
+        let func_src = "package main;\nfunc test (count i64) {}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(count: i64){}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_multi_name_single_type_params_and_no_result() {
+        let func_src = "package main;\nfunc test (a, b i64) {}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(a: i64, b: i64){}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_multi_name_multi_type_params_and_no_result() {
+        let func_src = "package main;\nfunc test (first string, second i64) {}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(first: string, second: i64){}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_no_params_and_single_unnamed_result() {
+        let func_src = "package main;\nfunc test ()string {}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test()->string{}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_no_params_and_multi_unnamed_result() {
+        let func_src = "package main;\nfunc test ()(string,error) {}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test()->(string, error){}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_no_params_and_single_named_result() {
+        let func_src = "package main;\nfunc test ()(name string) {}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test()->string{}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_no_params_and_multi_named_single_type_result() {
+        let func_src = "package main;\nfunc test ()(first, last string) {}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test()->(string, string){}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_no_params_or_result_or_body() {
+        let func_src = "package main;\nfunc test ()";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "unsafe extern \"C\" {fn test();}");
     }
 }
