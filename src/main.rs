@@ -342,6 +342,7 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
             let op: &str = op.op.into();
             format!("{x} {op} {y}")
         }
+        Expression::BasicLit(lit) => lit.value.clone(),
         _ => unimplemented![],
     }
 }
@@ -592,5 +593,29 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "fn test(a: int, b: int)->int{a + b}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_and_result_with_simple_binary_expression_on_int_literals() {
+        let func_src = "package main;\nfunc test ()int{1+2}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test()->int{1 + 2}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_and_result_with_simple_binary_expression_on_string_literals() {
+        let func_src = "package main;\nfunc test ()int{\"hello\" + \"world\"}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test()->int{\"hello\" + \"world\"}");
     }
 }
