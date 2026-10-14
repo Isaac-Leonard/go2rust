@@ -343,6 +343,10 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
             format!("{x} {op} {y}")
         }
         Expression::BasicLit(lit) => lit.value.clone(),
+        Expression::Paren(expr) => {
+            let expr = convert_expr(&expr.expr, context);
+            format!("({expr})")
+        }
         _ => unimplemented![],
     }
 }
@@ -617,5 +621,17 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "fn test()->int{\"hello\" + \"world\"}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_result_with_binary_expression_with_parens() {
+        let func_src = "package main;\nfunc test ()int{1+(2+3)}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test()->int{1 + (2 + 3)}");
     }
 }
