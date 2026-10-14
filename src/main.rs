@@ -622,6 +622,33 @@ mod tests {
     }
 
     #[test]
+    fn transform_struct_type_with_named_fields_with_generic() {
+        let struct_type_src = "package main;\ntype test struct {first i64; second t[string]}";
+        let mut parser = Parser::from(struct_type_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "struct test{\nfirst: i64,\nsecond: t<string>,\n}");
+    }
+
+    #[test]
+    fn transform_struct_type_with_named_fields_with_multi_generics() {
+        let struct_type_src = "package main;\ntype test struct {first i64; second t[string,i32, fourth[fifth,sixth]]}";
+        let mut parser = Parser::from(struct_type_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(
+            res,
+            "struct test{\nfirst: i64,\nsecond: t<string, i32, fourth<fifth, sixth>>,\n}"
+        );
+    }
+
+    #[test]
     fn transform_struct_type_with_unnamed_fields() {
         let struct_type_src = "package main;\ntype test struct {i64; string}";
         let mut parser = Parser::from(struct_type_src);
