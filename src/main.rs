@@ -3,8 +3,9 @@ pub mod name_resolution;
 use std::collections::{HashMap, hash_map::Entry};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use gosyn::ast::{Declaration, File, Import, InstantiatedType, StructType};
+use gosyn::ast::{Declaration, Expression, File, Import, InstantiatedType, Statement, StructType};
 use gosyn::ast::{FuncDecl, InterfaceType};
+use gosyn::token::Operator;
 use name_resolution::Context;
 
 fn main() {
@@ -67,7 +68,7 @@ fn convert_decl(decl: &Declaration, context: &mut Context) -> Result<String, Str
             }
             Ok(types)
         }
-        Declaration::Function(func_decl) => Ok(convert_function(func_decl)),
+        Declaration::Function(func_decl) => Ok(convert_function(func_decl, context)),
         Declaration::Const(decl) => todo!(),
         Declaration::Variable(decl) => todo!(),
     }
@@ -228,7 +229,7 @@ fn convert_struct(name: &str, typ: &StructType) -> WithExtraTypes {
     WithExtraTypes { typ, extras }
 }
 
-pub fn convert_function(func: &FuncDecl) -> String {
+pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
     let name = &func.name.name;
     let type_params = vec![];
     let mut extras = vec![];
@@ -323,11 +324,32 @@ pub fn convert_function(func: &FuncDecl) -> String {
     if let Some(body) = &func.body {
         let mut statements: Vec<String> = vec![];
         for stmt in &body.list {
-            unimplemented![];
+            statements.push(convert_stmt(stmt, context));
         }
-        format!("fn {name}{type_params}({params}){result}{{}}")
+        let statements = statements.join(";\n");
+        format!("fn {name}{type_params}({params}){result}{{{statements}}}")
     } else {
         format!("unsafe extern \"C\" {{fn {name}{type_params}({params}){result};}}")
+    }
+}
+
+pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
+    match expr {
+        Expression::Ident(ident) => ident.name.clone(),
+        Expression::Operation(op) => {
+            let x = convert_expr(&op.x, context);
+            let y = convert_expr(op.y.as_ref().unwrap(), context);
+            let op: &str = op.op.into();
+            format!("{x} {op} {y}")
+        }
+        _ => unimplemented![],
+    }
+}
+
+pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
+    match stmt {
+        Statement::Expr(expr) => convert_expr(&expr.expr, context),
+        _ => unimplemented![],
     }
 }
 
@@ -558,5 +580,17 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "unsafe extern \"C\" {fn test();}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_params_and_result_with_simple_binary_expression() {
+        let func_src = "package main;\nfunc test (a, b int)int{a+b}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(a: int, b: int)->int{a + b}");
     }
 }
