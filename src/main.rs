@@ -290,7 +290,7 @@ fn find_idents_in_type(typ: &gosyn::ast::Type) -> Vec<Contained> {
 pub fn find_idents_in_call(call: &Call) -> Vec<Contained> {
     let mut idents = find_idents_in_expression(&call.func);
     for arg in &call.args {
-        idents.extend(find_idents_in_expression(&arg));
+        idents.extend(find_idents_in_expression(arg));
     }
     idents
 }
@@ -502,7 +502,7 @@ fn convert_unnamed_type(typ: &gosyn::ast::Type) -> WithExtraTypes {
             WithExtraTypes { typ, extras }
         }
         Type::Struct(struct_t) => {
-            let name = generate_type_name(AnonymousType::Struct(&struct_t));
+            let name = generate_type_name(AnonymousType::Struct(struct_t));
             convert_struct(&name, struct_t)
         }
         _ => unimplemented![],
@@ -545,18 +545,45 @@ fn convert_struct(name: &str, typ: &StructType) -> WithExtraTypes {
     let header = format!("struct {name}{{");
     let mut fields = vec![];
     for field in &typ.fields {
-        let WithExtraTypes {
-            typ,
-            extras: field_extras,
-        } = convert_unnamed_type(&field.typ);
-        extras.extend(field_extras);
-        if field.name.len() == 0 {
-            fields.push(format!("{typ}: {typ},"));
-        } else {
-            for name in &field.name {
-                fields.push(format!("{}: {},", &name.name, typ));
+        match &field.field {
+            gosyn::ast::Field::Named(field) => {
+                let WithExtraTypes {
+                    typ,
+                    extras: field_extras,
+                } = convert_unnamed_type(&field.typ);
+                extras.extend(field_extras);
+                for name in &field.name {
+                    fields.push(format!("{}: {},", &name.name, typ));
+                }
             }
-        }
+            gosyn::ast::Field::Embedded(field) => {
+                let mut extras = vec![];
+                let mut arguments = vec![];
+
+                for arg in &field.type_args {
+                    let WithExtraTypes {
+                        typ,
+                        extras: arg_extras,
+                    } = convert_unnamed_type(arg);
+                    extras.extend(arg_extras);
+                    arguments.push(typ);
+                }
+                let arguments = if !arguments.is_empty() {
+                    format!("<{}>", arguments.join(", "))
+                } else {
+                    String::new()
+                };
+
+                let name = match &field.typ {
+                    gosyn::ast::NameType::Ident(name) => &name.name,
+                    gosyn::ast::NameType::Qualified(name) => &name.identifier.name,
+                };
+
+                let typ = convert_name(&field.typ);
+
+                fields.push(format!("{name}: {typ}{arguments},"));
+            }
+        };
     }
     let fields = fields.join("\n");
     let tail = "}";
@@ -604,5 +631,29 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "struct test{\ni64: i64,\nstring: string,\n}");
+    }
+
+    #[test]
+    fn transform_struct_type_with_qualified_unnamed_fields() {
+        let struct_type_src = "package main;\ntype test struct {i64; t.second}";
+        let mut parser = Parser::from(struct_type_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "struct test{\ni64: i64,\nsecond: t::second,\n}");
+    }
+
+    #[test]
+    fn transform_struct_type_with_qualified_unnamed_fields_with_generics() {
+        let struct_type_src = "package main;\ntype test struct {i64; t.second[third]}";
+        let mut parser = Parser::from(struct_type_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "struct test{\ni64: i64,\nsecond: t::second<third>,\n}");
     }
 }

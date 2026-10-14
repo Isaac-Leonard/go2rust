@@ -91,7 +91,7 @@ dependencies = [
 [[package]]
 name = "gosyn"
 version = "0.2.15"
-source = "git+https://github.com/Isaac-leonard/gosyn?rev=d9c1a11564c57c2797f7085e324315a884492412#d9c1a11564c57c2797f7085e324315a884492412"
+source = "git+https://github.com/Isaac-leonard/gosyn?rev=4c635cdbc1fb1d2fec6561d42c559d88d092a046#4c635cdbc1fb1d2fec6561d42c559d88d092a046"
 dependencies = [
  "anyhow",
  "strum",
