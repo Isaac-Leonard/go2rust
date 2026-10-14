@@ -646,6 +646,34 @@ mod tests {
     }
 
     #[test]
+    fn transform_struct_type_with_unnamed_fields_with_generics() {
+        let struct_type_src = "package main;\ntype test struct {i64; t[third]}";
+        let mut parser = Parser::from(struct_type_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "struct test{\ni64: i64,\nt: t<third>,\n}");
+    }
+
+    #[test]
+    fn transform_struct_type_with_unnamed_fields_with_multi_generics() {
+        let struct_type_src =
+            "package main;\ntype test struct {i64; t[third, fourth, fifth.sixth]}";
+        let mut parser = Parser::from(struct_type_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(
+            res,
+            "struct test{\ni64: i64,\nt: t<third, fourth, fifth::sixth>,\n}"
+        );
+    }
+
+    #[test]
     fn transform_struct_type_with_qualified_unnamed_fields_with_generics() {
         let struct_type_src = "package main;\ntype test struct {i64; t.second[third]}";
         let mut parser = Parser::from(struct_type_src);
