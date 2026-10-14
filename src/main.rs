@@ -72,7 +72,7 @@ fn convert_decl(decl: &Declaration, context: &mut Context) -> Result<String, Str
                 context
                     .types
                     .insert(spec.name.name.clone(), spec.typ.clone());
-                types += &convert_unnamed_type(&spec.typ).typ;
+                types += &convert_named_type(&spec.name.name, &spec.typ).typ;
             }
             Ok(types)
         }
@@ -441,6 +441,40 @@ pub struct WithExtraTypes {
     extras: Vec<String>,
 }
 
+fn convert_named_type(name: &str, typ: &gosyn::ast::Type) -> WithExtraTypes {
+    use gosyn::ast::Type;
+    match typ {
+        Type::Name(t_name) => WithExtraTypes {
+            typ: format!("type {} = {}", name, convert_name(t_name)),
+            extras: vec![],
+        },
+        Type::Instantiated(InstantiatedType {
+            name: t_name,
+            arguements,
+            ..
+        }) => {
+            let mut extras = vec![];
+            let typ = convert_name(t_name);
+            let arguments = arguements
+                .iter()
+                .map(convert_unnamed_type)
+                .map(|arg| {
+                    extras.extend(arg.extras);
+                    arg.typ
+                })
+                .reduce(|a, b| format!("{a}, {b}"));
+            let typ = match arguments {
+                Some(arguements) => format!("{typ}<{arguements}>"),
+                None => typ,
+            };
+            let typ = format!("type {name} = {typ}");
+            WithExtraTypes { typ, extras }
+        }
+        Type::Struct(struct_t) => convert_struct(name, struct_t),
+        _ => unimplemented![],
+    }
+}
+
 fn convert_unnamed_type(typ: &gosyn::ast::Type) -> WithExtraTypes {
     use gosyn::ast::Type;
     match typ {
@@ -528,4 +562,23 @@ fn convert_struct(name: &str, typ: &StructType) -> WithExtraTypes {
     let tail = "}";
     let typ = format!("{header}\n{fields}\n{tail}");
     WithExtraTypes { typ, extras }
+}
+
+#[cfg(test)]
+mod tests {
+    use gosyn::Parser;
+
+    use crate::{Context, convert_ast};
+
+    #[test]
+    fn transform_struct_type() {
+        let struct_type_src = "package main;\ntype test struct {}";
+        let mut parser = Parser::from(struct_type_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "struct test{\n\n}");
+    }
 }
