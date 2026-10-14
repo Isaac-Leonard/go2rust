@@ -571,7 +571,7 @@ mod tests {
     use crate::{Context, convert_ast};
 
     #[test]
-    fn transform_struct_type() {
+    fn transform_empty_struct_type() {
         let struct_type_src = "package main;\ntype test struct {}";
         let mut parser = Parser::from(struct_type_src);
         let file = parser
@@ -580,5 +580,29 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "struct test{\n\n}");
+    }
+
+    #[test]
+    fn transform_struct_type_with_named_fields() {
+        let struct_type_src = "package main;\ntype test struct {first i64; second string}";
+        let mut parser = Parser::from(struct_type_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "struct test{\nfirst: i64,\nsecond: string,\n}");
+    }
+
+    #[test]
+    fn transform_struct_type_with_unnamed_fields() {
+        let struct_type_src = "package main;\ntype test struct {i64; string}";
+        let mut parser = Parser::from(struct_type_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "struct test{\ni64: i64,\nstring: string,\n}");
     }
 }
