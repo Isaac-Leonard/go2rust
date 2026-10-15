@@ -1,13 +1,12 @@
 pub mod name_resolution;
 
-use std::collections::{HashMap, hash_map::Entry};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
-    Declaration, Expression, File, Import, InstantiatedType, SliceType, Statement, StructType,
+    ArrayType, Declaration, Expression, File, Import, InstantiatedType, SliceType, Statement,
+    StructType, Type,
 };
 use gosyn::ast::{FuncDecl, InterfaceType};
-use gosyn::token::Operator;
 use name_resolution::Context;
 
 fn main() {
@@ -28,11 +27,10 @@ fn main() {
 }
 
 pub fn convert_ast(file: File, context: &mut Context) -> Result<String, String> {
-    let mut context = Context::default();
     let imports = file
         .imports
         .iter()
-        .map(|import| convert_import(import, &mut context))
+        .map(|import| convert_import(import, context))
         .try_fold(String::new(), |a, b| -> Result<String, String> {
             Ok(a + &b?)
         })?;
@@ -40,7 +38,7 @@ pub fn convert_ast(file: File, context: &mut Context) -> Result<String, String> 
     let declarations = file
         .decl
         .iter()
-        .map(|decl| convert_decl(decl, &mut context))
+        .map(|decl| convert_decl(decl, context))
         .try_fold(String::new(), |a, b| -> Result<String, String> {
             Ok(a + &b?)
         })?;
@@ -66,7 +64,7 @@ fn convert_decl(decl: &Declaration, context: &mut Context) -> Result<String, Str
                 context
                     .types
                     .insert(spec.name.name.clone(), spec.typ.clone());
-                types += &convert_named_type(&spec.name.name, &spec.typ).typ;
+                types += &convert_named_type(&spec.name.name, &spec.typ, context).typ;
             }
             Ok(types)
         }
@@ -81,7 +79,7 @@ pub struct WithExtraTypes {
     extras: Vec<String>,
 }
 
-fn convert_named_type(name: &str, typ: &gosyn::ast::Type) -> WithExtraTypes {
+fn convert_named_type(name: &str, typ: &gosyn::ast::Type, context: &mut Context) -> WithExtraTypes {
     use gosyn::ast::Type;
     match typ {
         Type::Name(t_name) => WithExtraTypes {
@@ -97,7 +95,7 @@ fn convert_named_type(name: &str, typ: &gosyn::ast::Type) -> WithExtraTypes {
             let typ = convert_name(t_name);
             let arguments = arguments
                 .iter()
-                .map(convert_unnamed_type)
+                .map(|typ| convert_unnamed_type(typ, context))
                 .map(|arg| {
                     extras.extend(arg.extras);
                     arg.typ
@@ -110,12 +108,12 @@ fn convert_named_type(name: &str, typ: &gosyn::ast::Type) -> WithExtraTypes {
             let typ = format!("type {name} = {typ}");
             WithExtraTypes { typ, extras }
         }
-        Type::Struct(struct_t) => convert_struct(name, struct_t),
+        Type::Struct(struct_t) => convert_struct(name, struct_t, context),
         _ => unimplemented![],
     }
 }
 
-fn convert_unnamed_type(typ: &gosyn::ast::Type) -> WithExtraTypes {
+fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes {
     use gosyn::ast::Type;
     match typ {
         Type::Name(name) => WithExtraTypes {
@@ -129,7 +127,7 @@ fn convert_unnamed_type(typ: &gosyn::ast::Type) -> WithExtraTypes {
             let typ = convert_name(name);
             let arguments = arguments
                 .iter()
-                .map(convert_unnamed_type)
+                .map(|typ| convert_unnamed_type(typ, context))
                 .map(|arg| {
                     extras.extend(arg.extras);
                     arg.typ
@@ -143,11 +141,17 @@ fn convert_unnamed_type(typ: &gosyn::ast::Type) -> WithExtraTypes {
         }
         Type::Struct(struct_t) => {
             let name = generate_type_name(AnonymousType::Struct(struct_t));
-            convert_struct(&name, struct_t)
+            convert_struct(&name, struct_t, context)
         }
         Type::Slice(SliceType { typ, .. }) => {
-            let WithExtraTypes { typ, extras } = convert_unnamed_type(&**typ);
+            let WithExtraTypes { typ, extras } = convert_unnamed_type(&**typ, context);
             let typ = format!("&[{typ}]");
+            WithExtraTypes { extras, typ }
+        }
+        Type::Array(ArrayType { len, typ, .. }) => {
+            let len = convert_expr(&**len, context);
+            let WithExtraTypes { typ, extras } = convert_unnamed_type(&&*typ, context);
+            let typ = format!["{typ}[{len}]"];
             WithExtraTypes { extras, typ }
         }
         _ => unimplemented![],
@@ -185,7 +189,7 @@ fn next_anon_count() -> usize {
     ANON_TYPE_COUNTER.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-fn convert_struct(name: &str, typ: &StructType) -> WithExtraTypes {
+fn convert_struct(name: &str, typ: &StructType, context: &mut Context) -> WithExtraTypes {
     let mut extras = vec![];
     let header = format!("struct {name}{{");
     let mut fields = vec![];
@@ -195,7 +199,7 @@ fn convert_struct(name: &str, typ: &StructType) -> WithExtraTypes {
                 let WithExtraTypes {
                     typ,
                     extras: field_extras,
-                } = convert_unnamed_type(&field.typ);
+                } = convert_unnamed_type(&field.typ, context);
                 extras.extend(field_extras);
                 for name in &field.name {
                     fields.push(format!("{}: {},", &name.name, typ));
@@ -209,7 +213,7 @@ fn convert_struct(name: &str, typ: &StructType) -> WithExtraTypes {
                     let WithExtraTypes {
                         typ,
                         extras: arg_extras,
-                    } = convert_unnamed_type(arg);
+                    } = convert_unnamed_type(arg, context);
                     extras.extend(arg_extras);
                     arguments.push(typ);
                 }
@@ -264,7 +268,7 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
         let WithExtraTypes {
             typ,
             extras: param_extras,
-        } = convert_unnamed_type(&param.typ);
+        } = convert_unnamed_type(&param.typ, context);
         extras.extend(param_extras);
 
         match param.identifiers.as_slice() {
@@ -307,7 +311,7 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
         let WithExtraTypes {
             typ,
             extras: res_extras,
-        } = convert_unnamed_type(&res.typ);
+        } = convert_unnamed_type(&res.typ, context);
         extras.extend(res_extras);
         // unnamed
         if res.identifiers.is_empty() {
@@ -652,5 +656,17 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "fn test(arg: &[first]){}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_array_param() {
+        let func_src = "package main;\nfunc test (arg [5]first){}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(arg: first[5]){}");
     }
 }
