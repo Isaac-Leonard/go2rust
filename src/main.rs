@@ -3,8 +3,8 @@ pub mod name_resolution;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
-    ArrayType, Declaration, Expression, File, Import, InstantiatedType, MapType, SliceType,
-    Statement, StructType, Type,
+    ArrayType, BlockStmt, Declaration, Expression, File, Import, InstantiatedType, MapType,
+    SliceType, Statement, StructType, Type,
 };
 use gosyn::ast::{FuncDecl, InterfaceType};
 use name_resolution::Context;
@@ -346,12 +346,9 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
     };
 
     if let Some(body) = &func.body {
-        let mut statements: Vec<String> = vec![];
-        for stmt in &body.list {
-            statements.push(convert_stmt(stmt, context));
-        }
-        let statements = statements.join(";\n");
-        format!("fn {name}{type_params}({params}){result}{{{statements}}}")
+        let statements = convert_block_stmt(body, context);
+        // Note that `convert_block_stmt` wraps the block in braces so we don't need to wrap the body of the function in braces here
+        format!("fn {name}{type_params}({params}){result}{statements}")
     } else {
         format!("unsafe extern \"C\" {{fn {name}{type_params}({params}){result};}}")
     }
@@ -378,8 +375,19 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
 pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
     match stmt {
         Statement::Expr(expr) => convert_expr(&expr.expr, context),
+        Statement::Block(block) => convert_block_stmt(block, context),
         _ => unimplemented![],
     }
+}
+
+fn convert_block_stmt(block: &BlockStmt, context: &mut Context) -> String {
+    let statements = block
+        .list
+        .iter()
+        .map(|stmt| convert_stmt(stmt, context))
+        .collect::<Vec<_>>()
+        .join(";\n");
+    format!("{{\n{statements}\n}}")
 }
 
 #[cfg(test)]
@@ -512,7 +520,7 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(){}");
+        assert_eq!(res, "fn test(){\n\n}");
     }
 
     #[test]
@@ -524,7 +532,7 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(count: i64){}");
+        assert_eq!(res, "fn test(count: i64){\n\n}");
     }
 
     #[test]
@@ -536,7 +544,7 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(a: i64, b: i64){}");
+        assert_eq!(res, "fn test(a: i64, b: i64){\n\n}");
     }
 
     #[test]
@@ -548,7 +556,7 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(first: string, second: i64){}");
+        assert_eq!(res, "fn test(first: string, second: i64){\n\n}");
     }
 
     #[test]
@@ -560,7 +568,7 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->string{}");
+        assert_eq!(res, "fn test()->string{\n\n}");
     }
 
     #[test]
@@ -572,7 +580,7 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->(string, error){}");
+        assert_eq!(res, "fn test()->(string, error){\n\n}");
     }
 
     #[test]
@@ -584,7 +592,7 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->string{}");
+        assert_eq!(res, "fn test()->string{\n\n}");
     }
 
     #[test]
@@ -596,7 +604,7 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->(string, string){}");
+        assert_eq!(res, "fn test()->(string, string){\n\n}");
     }
 
     #[test]
@@ -620,7 +628,7 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(a: int, b: int)->int{a + b}");
+        assert_eq!(res, "fn test(a: int, b: int)->int{\na + b\n}");
     }
 
     #[test]
@@ -632,7 +640,7 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->int{1 + 2}");
+        assert_eq!(res, "fn test()->int{\n1 + 2\n}");
     }
 
     #[test]
@@ -644,7 +652,7 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->int{\"hello\" + \"world\"}");
+        assert_eq!(res, "fn test()->int{\n\"hello\" + \"world\"\n}");
     }
 
     #[test]
@@ -656,42 +664,54 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->int{1 + (2 + 3)}");
+        assert_eq!(res, "fn test()->int{\n1 + (2 + 3)\n}");
     }
 
     #[test]
     fn transform_func_decl_with_slice_param() {
-        let func_src = "package main;\nfunc test (arg []first){}";
+        let func_src = "package main;\nfunc test (arg []first){\n\n}";
         let mut parser = Parser::from(func_src);
         let file = parser
             .parse_file()
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(arg: &[first]){}");
+        assert_eq!(res, "fn test(arg: &[first]){\n\n}");
     }
 
     #[test]
     fn transform_func_decl_with_array_param() {
-        let func_src = "package main;\nfunc test (arg [5]first){}";
+        let func_src = "package main;\nfunc test (arg [5]first){\n\n}";
         let mut parser = Parser::from(func_src);
         let file = parser
             .parse_file()
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(arg: first[5]){}");
+        assert_eq!(res, "fn test(arg: first[5]){\n\n}");
     }
 
     #[test]
     fn transform_func_decl_with_map_param() {
-        let func_src = "package main;\nfunc test (arg map[int]string){}";
+        let func_src = "package main;\nfunc test (arg map[int]string){\n\n}";
         let mut parser = Parser::from(func_src);
         let file = parser
             .parse_file()
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(arg: HashMap<int, string>){}");
+        assert_eq!(res, "fn test(arg: HashMap<int, string>){\n\n}");
+    }
+
+    #[test]
+    fn transform_block_statements() {
+        let func_src = "package main;\nfunc test (){a+b;{c+d;}e+f}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(){\na + b;\n{\nc + d\n};\ne + f\n}");
     }
 }
