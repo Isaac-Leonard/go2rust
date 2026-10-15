@@ -391,6 +391,25 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
                 format!("return ({exprs});")
             }
         },
+        Statement::Assign(assign) => {
+            // TODO We need to fix this to evaluate everything in the correct order.
+            let left = assign
+                .left
+                .iter()
+                .map(|expr| convert_expr(expr, context))
+                .collect::<Vec<_>>();
+            let right = assign
+                .right
+                .iter()
+                .map(|expr| convert_expr(expr, context))
+                .collect::<Vec<_>>();
+            let op: &str = assign.op.into();
+            left.into_iter()
+                .zip(right)
+                .map(|(left, right)| format!("{left} {op} {right}"))
+                .collect::<Vec<_>>()
+                .join(";\n")
+        }
         _ => unimplemented![],
     }
 }
@@ -770,5 +789,41 @@ mod tests {
             res,
             "fn test()->(int, error){\na + b;\nreturn (count, error);\n}"
         );
+    }
+
+    #[test]
+    fn transform_func_with_simple_assign_statement() {
+        let func_src = "package main;\nfunc test (){a=b}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(){\na = b\n}");
+    }
+
+    #[test]
+    fn transform_func_with_multi_assign_statement() {
+        let func_src = "package main;\nfunc test (){a, b=c, d}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(){\na = c;\nb = d\n}");
+    }
+
+    #[test]
+    fn transform_func_with_plus_assign_statement() {
+        let func_src = "package main;\nfunc test (){a+=b}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(){\na += b\n}");
     }
 }
