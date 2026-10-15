@@ -88,12 +88,12 @@ fn convert_named_type(name: &str, typ: &gosyn::ast::Type) -> WithExtraTypes {
         },
         Type::Instantiated(InstantiatedType {
             name: t_name,
-            arguements,
+            arguments,
             ..
         }) => {
             let mut extras = vec![];
             let typ = convert_name(t_name);
-            let arguments = arguements
+            let arguments = arguments
                 .iter()
                 .map(convert_unnamed_type)
                 .map(|arg| {
@@ -102,7 +102,7 @@ fn convert_named_type(name: &str, typ: &gosyn::ast::Type) -> WithExtraTypes {
                 })
                 .reduce(|a, b| format!("{a}, {b}"));
             let typ = match arguments {
-                Some(arguements) => format!("{typ}<{arguements}>"),
+                Some(arguments) => format!("{typ}<{arguments}>"),
                 None => typ,
             };
             let typ = format!("type {name} = {typ}");
@@ -121,11 +121,11 @@ fn convert_unnamed_type(typ: &gosyn::ast::Type) -> WithExtraTypes {
             extras: vec![],
         },
         Type::Instantiated(InstantiatedType {
-            name, arguements, ..
+            name, arguments, ..
         }) => {
             let mut extras = vec![];
             let typ = convert_name(name);
-            let arguments = arguements
+            let arguments = arguments
                 .iter()
                 .map(convert_unnamed_type)
                 .map(|arg| {
@@ -134,7 +134,7 @@ fn convert_unnamed_type(typ: &gosyn::ast::Type) -> WithExtraTypes {
                 })
                 .reduce(|a, b| format!("{a}, {b}"));
             let typ = match arguments {
-                Some(arguements) => format!("{typ}<{arguements}>"),
+                Some(arguments) => format!("{typ}<{arguments}>"),
                 None => typ,
             };
             WithExtraTypes { typ, extras }

@@ -227,11 +227,11 @@ pub fn find_idents_in_call(call: &Call) -> Vec<Contained> {
 /// Contains lists of variables declared and used in a given program scope such as the entire program or a function.
 #[derive(Clone, Debug, Default)]
 pub struct Scope {
-    /// Named generics, function arguements or variables declared in this scope
+    /// Named generics, function arguments or variables declared in this scope
     provided: Vec<String>,
     /// All identifiers that are refered to in this scope
     referenced: Vec<String>,
-    /// Functions declared in this scope with their own arguements and local variables
+    /// Functions declared in this scope with their own arguments and local variables
     sub_scopes: Vec<Scope>,
 }
 
