@@ -376,6 +376,21 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
     match stmt {
         Statement::Expr(expr) => convert_expr(&expr.expr, context),
         Statement::Block(block) => convert_block_stmt(block, context),
+        Statement::Return(ret) => match ret.ret.as_slice() {
+            [] => "return;".to_string(),
+            [expr] => {
+                let expr = convert_expr(expr, context);
+                format!("return {expr};")
+            }
+            exprs => {
+                let exprs = exprs
+                    .iter()
+                    .map(|expr| convert_expr(expr, context))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("return ({exprs});")
+            }
+        },
         _ => unimplemented![],
     }
 }
@@ -713,5 +728,47 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "fn test(){\na + b;\n{\nc + d\n};\ne + f\n}");
+    }
+
+    #[test]
+    fn transform_func_with_return_statement_single() {
+        let func_src = "package main;\nfunc test ()int{a+b;return c+d}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test()->int{\na + b;\nreturn c + d;\n}");
+    }
+
+    #[test]
+    fn transform_func_with_return_statement_multi() {
+        let func_src = "package main;\nfunc test ()(int, string){a+b;return c+d, \"hello\"}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(
+            res,
+            "fn test()->(int, string){\na + b;\nreturn (c + d, \"hello\");\n}"
+        );
+    }
+
+    #[test]
+    fn transform_func_with_return_statement_named_multi() {
+        let func_src = "package main;\nfunc test ()(count int, err error){a+b;return count, error}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(
+            res,
+            "fn test()->(int, error){\na + b;\nreturn (count, error);\n}"
+        );
     }
 }
