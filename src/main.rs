@@ -3,7 +3,9 @@ pub mod name_resolution;
 use std::collections::{HashMap, hash_map::Entry};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use gosyn::ast::{Declaration, Expression, File, Import, InstantiatedType, Statement, StructType};
+use gosyn::ast::{
+    Declaration, Expression, File, Import, InstantiatedType, SliceType, Statement, StructType,
+};
 use gosyn::ast::{FuncDecl, InterfaceType};
 use gosyn::token::Operator;
 use name_resolution::Context;
@@ -142,6 +144,11 @@ fn convert_unnamed_type(typ: &gosyn::ast::Type) -> WithExtraTypes {
         Type::Struct(struct_t) => {
             let name = generate_type_name(AnonymousType::Struct(struct_t));
             convert_struct(&name, struct_t)
+        }
+        Type::Slice(SliceType { typ, .. }) => {
+            let WithExtraTypes { typ, extras } = convert_unnamed_type(&**typ);
+            let typ = format!("&[{typ}]");
+            WithExtraTypes { extras, typ }
         }
         _ => unimplemented![],
     }
@@ -633,5 +640,17 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "fn test()->int{1 + (2 + 3)}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_slice_param() {
+        let func_src = "package main;\nfunc test (arg []first){}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(arg: &[first]){}");
     }
 }
