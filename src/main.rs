@@ -3,8 +3,8 @@ pub mod name_resolution;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
-    ArrayType, BlockStmt, Declaration, Expression, File, Import, InstantiatedType, MapType,
-    SliceType, Statement, StructType, Type,
+    ArrayType, BlockStmt, ConstSpec, Decl, DeclStmt, Declaration, Expression, File, Import,
+    InstantiatedType, MapType, SliceType, Statement, StructType, Type, TypeSpec, VarSpec,
 };
 use gosyn::ast::{FuncDecl, InterfaceType};
 use name_resolution::Context;
@@ -58,20 +58,30 @@ fn convert_import(import: &Import, _context: &mut Context) -> Result<String, Str
 
 fn convert_decl(decl: &Declaration, context: &mut Context) -> Result<String, String> {
     match decl {
-        Declaration::Type(type_d) => {
-            let mut types = String::new();
-            for spec in &type_d.specs {
-                context
-                    .types
-                    .insert(spec.name.name.clone(), spec.typ.clone());
-                types += &convert_named_type(&spec.name.name, &spec.typ, context).typ;
-            }
-            Ok(types)
-        }
+        Declaration::Type(type_decl) => Ok(convert_type_decl(type_decl, context)),
         Declaration::Function(func_decl) => Ok(convert_function(func_decl, context)),
-        Declaration::Const(decl) => todo!(),
-        Declaration::Variable(decl) => todo!(),
+        Declaration::Const(const_decl) => Ok(convert_const_decl(const_decl, context)),
+        Declaration::Variable(var_decl) => Ok(convert_variable_decl(var_decl, context)),
     }
+}
+
+pub fn convert_type_decl(type_d: &Decl<TypeSpec>, context: &mut Context) -> String {
+    let mut types = String::new();
+    for spec in &type_d.specs {
+        context
+            .types
+            .insert(spec.name.name.clone(), spec.typ.clone());
+        types += &convert_named_type(&spec.name.name, &spec.typ, context).typ;
+    }
+    types
+}
+
+pub fn convert_const_decl(const_decl: &Decl<ConstSpec>, context: &mut Context) -> String {
+    todo!()
+}
+
+pub fn convert_variable_decl(const_decl: &Decl<VarSpec>, context: &mut Context) -> String {
+    todo!()
 }
 
 pub struct WithExtraTypes {
@@ -425,6 +435,11 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
                 .collect::<Vec<_>>()
                 .join(";\n")
         }
+        Statement::Declaration(decl) => match decl {
+            DeclStmt::Type(typ_decl) => convert_type_decl(typ_decl, context),
+            DeclStmt::Const(const_decl) => convert_const_decl(const_decl, context),
+            DeclStmt::Variable(var_decl) => convert_variable_decl(var_decl, context),
+        },
         _ => unimplemented![],
     }
 }
