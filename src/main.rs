@@ -3,8 +3,8 @@ pub mod name_resolution;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
-    ArrayType, Declaration, Expression, File, Import, InstantiatedType, SliceType, Statement,
-    StructType, Type,
+    ArrayType, Declaration, Expression, File, Import, InstantiatedType, MapType, SliceType,
+    Statement, StructType, Type,
 };
 use gosyn::ast::{FuncDecl, InterfaceType};
 use name_resolution::Context;
@@ -152,6 +152,19 @@ fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes {
             let len = convert_expr(&**len, context);
             let WithExtraTypes { typ, extras } = convert_unnamed_type(&&*typ, context);
             let typ = format!["{typ}[{len}]"];
+            WithExtraTypes { extras, typ }
+        }
+        Type::Map(MapType { key, val, .. }) => {
+            let WithExtraTypes {
+                typ: key,
+                mut extras,
+            } = convert_unnamed_type(&**key, context);
+            let WithExtraTypes {
+                typ: val,
+                extras: val_extras,
+            } = convert_unnamed_type(&&*val, context);
+            extras.extend(val_extras);
+            let typ = format!["HashMap<{key}, {val}>"];
             WithExtraTypes { extras, typ }
         }
         _ => unimplemented![],
@@ -668,5 +681,17 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "fn test(arg: first[5]){}");
+    }
+
+    #[test]
+    fn transform_func_decl_with_map_param() {
+        let func_src = "package main;\nfunc test (arg map[int]string){}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(arg: HashMap<int, string>){}");
     }
 }
