@@ -368,6 +368,21 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
             let expr = convert_expr(&expr.expr, context);
             format!("({expr})")
         }
+        Expression::Call(call) => {
+            // TODO Handle passing variadic arguments.
+            // TODO Handle passing rest arguments.
+            let func = convert_expr(&call.func, context);
+            if call.dots.is_some() {
+                unimplemented!("Cannot flatten rest arguments yet");
+            }
+            let args = call
+                .args
+                .iter()
+                .map(|expr| convert_expr(expr, context))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{func}({args})")
+        }
         _ => unimplemented![],
     }
 }
@@ -825,5 +840,29 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "fn test(){\na += b\n}");
+    }
+
+    #[test]
+    fn transform_func_with_simple_call_expression() {
+        let func_src = "package main;\nfunc test (){myfunc()}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(){\nmyfunc()\n}");
+    }
+
+    #[test]
+    fn transform_func_with_call_expression_with_arguments() {
+        let func_src = "package main;\nfunc test (){myfunc(a,b)}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(){\nmyfunc(a, b)\n}");
     }
 }
