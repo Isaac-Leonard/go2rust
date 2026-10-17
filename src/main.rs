@@ -3,7 +3,7 @@ pub mod name_resolution;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
-    ArrayType, BlockStmt, ConstSpec, Decl, DeclStmt, Declaration, Expression, File, Import,
+    ArrayType, BlockStmt, ConstSpec, Decl, DeclStmt, Declaration, Expression, File, IfStmt, Import,
     InstantiatedType, MapType, ShortVarDecl, SliceType, Statement, StructType, Type, TypeSpec,
     VarSpec,
 };
@@ -225,13 +225,13 @@ fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes {
             convert_struct(&name, struct_t, context)
         }
         Type::Slice(SliceType { typ, .. }) => {
-            let WithExtraTypes { typ, extras } = convert_unnamed_type(&**typ, context);
+            let WithExtraTypes { typ, extras } = convert_unnamed_type(typ, context);
             let typ = format!("&[{typ}]");
             WithExtraTypes { extras, typ }
         }
         Type::Array(ArrayType { len, typ, .. }) => {
-            let len = convert_expr(&**len, context);
-            let WithExtraTypes { typ, extras } = convert_unnamed_type(&&*typ, context);
+            let len = convert_expr(len, context);
+            let WithExtraTypes { typ, extras } = convert_unnamed_type(typ, context);
             let typ = format!["{typ}[{len}]"];
             WithExtraTypes { extras, typ }
         }
@@ -239,11 +239,11 @@ fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes {
             let WithExtraTypes {
                 typ: key,
                 mut extras,
-            } = convert_unnamed_type(&**key, context);
+            } = convert_unnamed_type(key, context);
             let WithExtraTypes {
                 typ: val,
                 extras: val_extras,
-            } = convert_unnamed_type(&&*val, context);
+            } = convert_unnamed_type(val, context);
             extras.extend(val_extras);
             let typ = format!["HashMap<{key}, {val}>"];
             WithExtraTypes { extras, typ }
@@ -512,6 +512,7 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
             DeclStmt::Variable(var_decl) => convert_variable_decl(var_decl, context),
         },
         Statement::ShortVarDecl(decl) => convert_short_variable_decl(decl, context),
+        Statement::If(if_stmt) => convert_if_stmt(if_stmt, context),
         _ => unimplemented![],
     }
 }
@@ -524,6 +525,27 @@ fn convert_block_stmt(block: &BlockStmt, context: &mut Context) -> String {
         .collect::<Vec<_>>()
         .join(";\n");
     format!("{{\n{statements}\n}}")
+}
+
+fn convert_if_stmt(if_stmt: &IfStmt, context: &mut Context) -> String {
+    let cond = convert_expr(&if_stmt.cond, context);
+    let body = convert_block_stmt(&if_stmt.body, context);
+    let else_ = if let Some(else_) = &if_stmt.else_ {
+        let else_ = convert_stmt(else_, context);
+        // The else statement is either an if statement or a block statement so the formatting will work the same in rust as it will for go with braces and we don't need to do anything special.
+        format!(" else {else_}")
+    } else {
+        String::new()
+    };
+
+    if let Some(init) = &if_stmt.init {
+        let init = convert_stmt(init, context);
+
+        // We must put the init statement and following if block in it's own scope as variables declared in go init statements are local to the scope of the if statement they are declared for, hence the extra surrounding braces.
+        format!("{{\n{init}\nif {cond} {body}{else_}\n}}")
+    } else {
+        format!("if {cond} {body}{else_}")
+    }
 }
 
 #[cfg(test)]
@@ -987,5 +1009,63 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "fn test(){\nlet mut (ok, err) = (2, 5);\n}");
+    }
+
+    #[test]
+    fn transform_simple_if_statement() {
+        let func_src = "package main;\nfunc test (){if a>b{do_thing()}}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(){\nif a > b {\ndo_thing()\n}\n}");
+    }
+
+    #[test]
+    fn transform_if_statement_with_else() {
+        let func_src = "package main;\nfunc test (){if a>b{do_thing()}else {do_other_thing()};}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(
+            res,
+            "fn test(){\nif a > b {\ndo_thing()\n} else {\ndo_other_thing()\n}\n}"
+        );
+    }
+
+    #[test]
+    fn transform_if_statement_with_if_else() {
+        let func_src = "package main;\nfunc test (){if a>b{do_thing()}else if a<b {do_other_thing()} else{do_another_thing()};}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(
+            res,
+            "fn test(){\nif a > b {\ndo_thing()\n} else if a < b {\ndo_other_thing()\n} else {\ndo_another_thing()\n}\n}"
+        );
+    }
+
+    #[test]
+    fn transform_if_statement_with_else_and_init() {
+        let func_src =
+            "package main;\nfunc test (){if a,b:=calc(); a>b{do_thing()}else {do_other_thing()};}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(
+            res,
+            "fn test(){\n{\nlet mut (a, b) = calc();\nif a > b {\ndo_thing()\n} else {\ndo_other_thing()\n}\n}\n}"
+        );
     }
 }
