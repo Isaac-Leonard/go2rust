@@ -120,6 +120,7 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
         Statement::Switch(switch_stmt) => todo!(),
         Statement::Select(select_stmt) => todo!(),
         Statement::Declaration(decl_stmt) => todo!(),
+        Statement::ShortVarDecl(short_var_decl) => todo!(),
     }
 }
 

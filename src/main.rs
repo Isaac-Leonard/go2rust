@@ -4,7 +4,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
     ArrayType, BlockStmt, ConstSpec, Decl, DeclStmt, Declaration, Expression, File, Import,
-    InstantiatedType, MapType, SliceType, Statement, StructType, Type, TypeSpec, VarSpec,
+    InstantiatedType, MapType, ShortVarDecl, SliceType, Statement, StructType, Type, TypeSpec,
+    VarSpec,
 };
 use gosyn::ast::{FuncDecl, InterfaceType};
 use name_resolution::Context;
@@ -80,8 +81,78 @@ pub fn convert_const_decl(const_decl: &Decl<ConstSpec>, context: &mut Context) -
     todo!()
 }
 
-pub fn convert_variable_decl(const_decl: &Decl<VarSpec>, context: &mut Context) -> String {
-    todo!()
+/// Converts variable declarations to rust syntax.
+/// This currently only outputs variables declared as static mut such as:
+/// ```
+/// static mut variable=value;
+/// ```
+/// This means that global variables are not yet properly supported and all variables are treated as mutable.
+/// This function does not perform any type inference so will only output types on variables if they are present in the original Go source.
+/// Multi variable declarations are split into multiple single variable declarations in rust.
+///
+/// Note This does not yet output declarations for anonymous types.
+pub fn convert_variable_decl(var_decl: &Decl<VarSpec>, context: &mut Context) -> String {
+    let mut extras = vec![];
+    let mut declarations = vec![];
+    for spec in &var_decl.specs {
+        let typ = if let Some(typ) = &spec.typ {
+            let WithExtraTypes {
+                typ,
+                extras: var_extras,
+            } = convert_unnamed_type(typ, context);
+            extras.extend(var_extras);
+            format!(": {typ}")
+        } else {
+            String::new()
+        };
+        for (name, value) in spec.name.iter().zip(spec.values.iter()) {
+            let name = &name.name;
+            let value = convert_expr(value, context);
+            declarations.push(format!("static mut {name}{typ} = {value};"))
+        }
+    }
+
+    declarations.join("\n")
+}
+
+/// Converts variable short form declarations to rust syntax.
+/// This currently only outputs variables declared as let mut such as:
+/// ```
+/// let mut variable=value;
+/// ```
+/// This means that all variables are treated as mutable.
+/// This function does not perform any type inference so will not output types on variables.
+/// Multi variable declarations are split into multiple single variable declarations in rust.
+///
+pub fn convert_short_variable_decl(decl: &ShortVarDecl, context: &mut Context) -> String {
+    let names = decl
+        .name
+        .iter()
+        .map(|name| name.name.clone())
+        .collect::<Vec<_>>();
+    let values = decl
+        .values
+        .iter()
+        .map(|value| convert_expr(value, context))
+        .collect::<Vec<_>>();
+
+    let names = match names.as_slice() {
+        [name] => name.clone(),
+        names => {
+            let names = names.join(", ");
+            format!("({names})")
+        }
+    };
+
+    let values = match values.as_slice() {
+        [value] => value.to_string(),
+        values => {
+            let values = values.join(", ");
+            format!("({values})")
+        }
+    };
+
+    format!("let mut {names} = {values};")
 }
 
 pub struct WithExtraTypes {
@@ -440,6 +511,7 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
             DeclStmt::Const(const_decl) => convert_const_decl(const_decl, context),
             DeclStmt::Variable(var_decl) => convert_variable_decl(var_decl, context),
         },
+        Statement::ShortVarDecl(decl) => convert_short_variable_decl(decl, context),
         _ => unimplemented![],
     }
 }
@@ -879,5 +951,41 @@ mod tests {
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
         assert_eq!(res, "fn test(){\nmyfunc(a, b)\n}");
+    }
+
+    #[test]
+    fn transform_short_variable_declaration() {
+        let func_src = "package main;\nfunc test (){a:=5}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(){\nlet mut a = 5;\n}");
+    }
+
+    #[test]
+    fn transform_short_variable_declaration_with_multi_name() {
+        let func_src = "package main;\nfunc test (){ok, err:=calculate()}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(){\nlet mut (ok, err) = calculate();\n}");
+    }
+
+    #[test]
+    fn transform_short_variable_declaration_with_multi_name_and_expression() {
+        let func_src = "package main;\nfunc test (){ok, err:=2, 5}";
+        let mut parser = Parser::from(func_src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap();
+        let res = convert_ast(file, &mut Context::default()).unwrap();
+        assert_eq!(res, "fn test(){\nlet mut (ok, err) = (2, 5);\n}");
     }
 }

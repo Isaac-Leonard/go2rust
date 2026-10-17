@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 chumsky = "0.13.0"
-gosyn = {"git"="https://github.com/Isaac-leonard/gosyn", rev = "12f723d5e2217ae7c4191e02a564ca014e9ec0c6"}
+gosyn = {"git"="https://github.com/Isaac-leonard/gosyn", rev = "4582005a5dd835dc2a915fe1a18ea63743a40221"}
