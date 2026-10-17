@@ -554,518 +554,330 @@ mod tests {
 
     use crate::{Context, convert_ast};
 
-    #[test]
-    fn transform_empty_struct_type() {
-        let struct_type_src = "package main;\ntype test struct {}";
-        let mut parser = Parser::from(struct_type_src);
+    /// Transforms the golang string into rust then asserts that it is exactly equal to the given rust string.
+    fn assert_transformation(golang: &str, rust: &str) {
+        let mut parser = Parser::from(golang);
         let file = parser
             .parse_file()
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "struct test{\n\n}");
+        assert_eq!(res, rust);
+    }
+
+    #[test]
+    fn transform_empty_struct_type() {
+        assert_transformation("package main;\ntype test struct {}", "struct test{\n\n}");
     }
 
     #[test]
     fn transform_struct_type_with_named_fields() {
-        let struct_type_src = "package main;\ntype test struct {first i64; second string}";
-        let mut parser = Parser::from(struct_type_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "struct test{\nfirst: i64,\nsecond: string,\n}");
+        assert_transformation(
+            "package main;\ntype test struct {first i64; second string}",
+            "struct test{\nfirst: i64,\nsecond: string,\n}",
+        );
     }
 
     #[test]
     fn transform_struct_type_with_named_fields_with_generic() {
-        let struct_type_src = "package main;\ntype test struct {first i64; second t[string]}";
-        let mut parser = Parser::from(struct_type_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "struct test{\nfirst: i64,\nsecond: t<string>,\n}");
+        assert_transformation(
+            "package main;\ntype test struct {first i64; second t[string]}",
+            "struct test{\nfirst: i64,\nsecond: t<string>,\n}",
+        );
     }
 
     #[test]
     fn transform_struct_type_with_named_fields_with_multi_generics() {
-        let struct_type_src = "package main;\ntype test struct {first i64; second t[string,i32, fourth[fifth,sixth]]}";
-        let mut parser = Parser::from(struct_type_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(
-            res,
-            "struct test{\nfirst: i64,\nsecond: t<string, i32, fourth<fifth, sixth>>,\n}"
+        assert_transformation(
+            "package main;\ntype test struct {first i64; second t[string,i32, fourth[fifth,sixth]]}",
+            "struct test{\nfirst: i64,\nsecond: t<string, i32, fourth<fifth, sixth>>,\n}",
         );
     }
 
     #[test]
     fn transform_struct_type_with_unnamed_fields() {
-        let struct_type_src = "package main;\ntype test struct {i64; string}";
-        let mut parser = Parser::from(struct_type_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "struct test{\ni64: i64,\nstring: string,\n}");
+        assert_transformation(
+            "package main;\ntype test struct {i64; string}",
+            "struct test{\ni64: i64,\nstring: string,\n}",
+        );
     }
 
     #[test]
     fn transform_struct_type_with_qualified_unnamed_fields() {
-        let struct_type_src = "package main;\ntype test struct {i64; t.second}";
-        let mut parser = Parser::from(struct_type_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "struct test{\ni64: i64,\nsecond: t::second,\n}");
+        assert_transformation(
+            "package main;\ntype test struct {i64; t.second}",
+            "struct test{\ni64: i64,\nsecond: t::second,\n}",
+        );
     }
 
     #[test]
     fn transform_struct_type_with_unnamed_fields_with_generics() {
-        let struct_type_src = "package main;\ntype test struct {i64; t[third]}";
-        let mut parser = Parser::from(struct_type_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "struct test{\ni64: i64,\nt: t<third>,\n}");
+        assert_transformation(
+            "package main;\ntype test struct {i64; t[third]}",
+            "struct test{\ni64: i64,\nt: t<third>,\n}",
+        );
     }
 
     #[test]
     fn transform_struct_type_with_unnamed_fields_with_multi_generics() {
-        let struct_type_src =
-            "package main;\ntype test struct {i64; t[third, fourth, fifth.sixth]}";
-        let mut parser = Parser::from(struct_type_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(
-            res,
-            "struct test{\ni64: i64,\nt: t<third, fourth, fifth::sixth>,\n}"
+        assert_transformation(
+            "package main;\ntype test struct {i64; t[third, fourth, fifth.sixth]}",
+            "struct test{\ni64: i64,\nt: t<third, fourth, fifth::sixth>,\n}",
         );
     }
 
     #[test]
     fn transform_struct_type_with_qualified_unnamed_fields_with_generics() {
-        let struct_type_src = "package main;\ntype test struct {i64; t.second[third]}";
-        let mut parser = Parser::from(struct_type_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "struct test{\ni64: i64,\nsecond: t::second<third>,\n}");
+        assert_transformation(
+            "package main;\ntype test struct {i64; t.second[third]}",
+            "struct test{\ni64: i64,\nsecond: t::second<third>,\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_no_params_or_result() {
-        let func_src = "package main;\nfunc test () {}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(){\n\n}");
+        assert_transformation("package main;\nfunc test () {}", "fn test(){\n\n}");
     }
 
     #[test]
     fn transform_func_decl_with_single_named_params_and_no_result() {
-        let func_src = "package main;\nfunc test (count i64) {}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(count: i64){\n\n}");
+        assert_transformation(
+            "package main;\nfunc test (count i64) {}",
+            "fn test(count: i64){\n\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_multi_name_single_type_params_and_no_result() {
-        let func_src = "package main;\nfunc test (a, b i64) {}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(a: i64, b: i64){\n\n}");
+        assert_transformation(
+            "package main;\nfunc test (a, b i64) {}",
+            "fn test(a: i64, b: i64){\n\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_multi_name_multi_type_params_and_no_result() {
-        let func_src = "package main;\nfunc test (first string, second i64) {}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(first: string, second: i64){\n\n}");
+        assert_transformation(
+            "package main;\nfunc test (first string, second i64) {}",
+            "fn test(first: string, second: i64){\n\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_no_params_and_single_unnamed_result() {
-        let func_src = "package main;\nfunc test ()string {}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->string{\n\n}");
+        assert_transformation(
+            "package main;\nfunc test ()string {}",
+            "fn test()->string{\n\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_no_params_and_multi_unnamed_result() {
-        let func_src = "package main;\nfunc test ()(string,error) {}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->(string, error){\n\n}");
+        assert_transformation(
+            "package main;\nfunc test ()(string,error) {}",
+            "fn test()->(string, error){\n\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_no_params_and_single_named_result() {
-        let func_src = "package main;\nfunc test ()(name string) {}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->string{\n\n}");
+        assert_transformation(
+            "package main;\nfunc test ()(name string) {}",
+            "fn test()->string{\n\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_no_params_and_multi_named_single_type_result() {
-        let func_src = "package main;\nfunc test ()(first, last string) {}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->(string, string){\n\n}");
+        assert_transformation(
+            "package main;\nfunc test ()(first, last string) {}",
+            "fn test()->(string, string){\n\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_no_params_or_result_or_body() {
-        let func_src = "package main;\nfunc test ()";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "unsafe extern \"C\" {fn test();}");
+        assert_transformation(
+            "package main;\nfunc test ()",
+            "unsafe extern \"C\" {fn test();}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_params_and_result_with_simple_binary_expression() {
-        let func_src = "package main;\nfunc test (a, b int)int{a+b}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(a: int, b: int)->int{\na + b\n}");
+        assert_transformation(
+            "package main;\nfunc test (a, b int)int{a+b}",
+            "fn test(a: int, b: int)->int{\na + b\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_and_result_with_simple_binary_expression_on_int_literals() {
-        let func_src = "package main;\nfunc test ()int{1+2}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->int{\n1 + 2\n}");
+        assert_transformation(
+            "package main;\nfunc test ()int{1+2}",
+            "fn test()->int{\n1 + 2\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_and_result_with_simple_binary_expression_on_string_literals() {
-        let func_src = "package main;\nfunc test ()int{\"hello\" + \"world\"}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->int{\n\"hello\" + \"world\"\n}");
+        assert_transformation(
+            "package main;\nfunc test ()int{\"hello\" + \"world\"}",
+            "fn test()->int{\n\"hello\" + \"world\"\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_result_with_binary_expression_with_parens() {
-        let func_src = "package main;\nfunc test ()int{1+(2+3)}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->int{\n1 + (2 + 3)\n}");
+        assert_transformation(
+            "package main;\nfunc test ()int{1+(2+3)}",
+            "fn test()->int{\n1 + (2 + 3)\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_slice_param() {
-        let func_src = "package main;\nfunc test (arg []first){\n\n}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(arg: &[first]){\n\n}");
+        assert_transformation(
+            "package main;\nfunc test (arg []first){\n\n}",
+            "fn test(arg: &[first]){\n\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_array_param() {
-        let func_src = "package main;\nfunc test (arg [5]first){\n\n}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(arg: first[5]){\n\n}");
+        assert_transformation(
+            "package main;\nfunc test (arg [5]first){\n\n}",
+            "fn test(arg: first[5]){\n\n}",
+        );
     }
 
     #[test]
     fn transform_func_decl_with_map_param() {
-        let func_src = "package main;\nfunc test (arg map[int]string){\n\n}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(arg: HashMap<int, string>){\n\n}");
+        assert_transformation(
+            "package main;\nfunc test (arg map[int]string){\n\n}",
+            "fn test(arg: HashMap<int, string>){\n\n}",
+        );
     }
 
     #[test]
     fn transform_block_statements() {
-        let func_src = "package main;\nfunc test (){a+b;{c+d;}e+f}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(){\na + b;\n{\nc + d\n};\ne + f\n}");
+        assert_transformation(
+            "package main;\nfunc test (){a+b;{c+d;}e+f}",
+            "fn test(){\na + b;\n{\nc + d\n};\ne + f\n}",
+        );
     }
 
     #[test]
     fn transform_func_with_return_statement_single() {
-        let func_src = "package main;\nfunc test ()int{a+b;return c+d}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test()->int{\na + b;\nreturn c + d;\n}");
+        assert_transformation(
+            "package main;\nfunc test ()int{a+b;return c+d}",
+            "fn test()->int{\na + b;\nreturn c + d;\n}",
+        );
     }
 
     #[test]
     fn transform_func_with_return_statement_multi() {
-        let func_src = "package main;\nfunc test ()(int, string){a+b;return c+d, \"hello\"}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(
-            res,
-            "fn test()->(int, string){\na + b;\nreturn (c + d, \"hello\");\n}"
+        assert_transformation(
+            "package main;\nfunc test ()(int, string){a+b;return c+d, \"hello\"}",
+            "fn test()->(int, string){\na + b;\nreturn (c + d, \"hello\");\n}",
         );
     }
 
     #[test]
     fn transform_func_with_return_statement_named_multi() {
-        let func_src = "package main;\nfunc test ()(count int, err error){a+b;return count, error}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(
-            res,
-            "fn test()->(int, error){\na + b;\nreturn (count, error);\n}"
+        assert_transformation(
+            "package main;\nfunc test ()(count int, err error){a+b;return count, error}",
+            "fn test()->(int, error){\na + b;\nreturn (count, error);\n}",
         );
     }
 
     #[test]
     fn transform_func_with_simple_assign_statement() {
-        let func_src = "package main;\nfunc test (){a=b}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(){\na = b\n}");
+        assert_transformation("package main;\nfunc test (){a=b}", "fn test(){\na = b\n}");
     }
 
     #[test]
     fn transform_func_with_multi_assign_statement() {
-        let func_src = "package main;\nfunc test (){a, b=c, d}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(){\na = c;\nb = d\n}");
+        assert_transformation(
+            "package main;\nfunc test (){a, b=c, d}",
+            "fn test(){\na = c;\nb = d\n}",
+        );
     }
 
     #[test]
     fn transform_func_with_plus_assign_statement() {
-        let func_src = "package main;\nfunc test (){a+=b}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(){\na += b\n}");
+        assert_transformation("package main;\nfunc test (){a+=b}", "fn test(){\na += b\n}");
     }
 
     #[test]
     fn transform_func_with_simple_call_expression() {
-        let func_src = "package main;\nfunc test (){myfunc()}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(){\nmyfunc()\n}");
+        assert_transformation(
+            "package main;\nfunc test (){myfunc()}",
+            "fn test(){\nmyfunc()\n}",
+        );
     }
 
     #[test]
     fn transform_func_with_call_expression_with_arguments() {
-        let func_src = "package main;\nfunc test (){myfunc(a,b)}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(){\nmyfunc(a, b)\n}");
+        assert_transformation(
+            "package main;\nfunc test (){myfunc(a,b)}",
+            "fn test(){\nmyfunc(a, b)\n}",
+        );
     }
 
     #[test]
     fn transform_short_variable_declaration() {
-        let func_src = "package main;\nfunc test (){a:=5}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(){\nlet mut a = 5;\n}");
+        assert_transformation(
+            "package main;\nfunc test (){a:=5}",
+            "fn test(){\nlet mut a = 5;\n}",
+        );
     }
 
     #[test]
     fn transform_short_variable_declaration_with_multi_name() {
-        let func_src = "package main;\nfunc test (){ok, err:=calculate()}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(){\nlet mut (ok, err) = calculate();\n}");
+        assert_transformation(
+            "package main;\nfunc test (){ok, err:=calculate()}",
+            "fn test(){\nlet mut (ok, err) = calculate();\n}",
+        );
     }
 
     #[test]
     fn transform_short_variable_declaration_with_multi_name_and_expression() {
-        let func_src = "package main;\nfunc test (){ok, err:=2, 5}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(){\nlet mut (ok, err) = (2, 5);\n}");
+        assert_transformation(
+            "package main;\nfunc test (){ok, err:=2, 5}",
+            "fn test(){\nlet mut (ok, err) = (2, 5);\n}",
+        );
     }
 
     #[test]
     fn transform_simple_if_statement() {
-        let func_src = "package main;\nfunc test (){if a>b{do_thing()}}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(res, "fn test(){\nif a > b {\ndo_thing()\n}\n}");
+        assert_transformation(
+            "package main;\nfunc test (){if a>b{do_thing()}}",
+            "fn test(){\nif a > b {\ndo_thing()\n}\n}",
+        );
     }
 
     #[test]
     fn transform_if_statement_with_else() {
-        let func_src = "package main;\nfunc test (){if a>b{do_thing()}else {do_other_thing()};}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(
-            res,
-            "fn test(){\nif a > b {\ndo_thing()\n} else {\ndo_other_thing()\n}\n}"
+        assert_transformation(
+            "package main;\nfunc test (){if a>b{do_thing()}else {do_other_thing()};}",
+            "fn test(){\nif a > b {\ndo_thing()\n} else {\ndo_other_thing()\n}\n}",
         );
     }
 
     #[test]
     fn transform_if_statement_with_if_else() {
-        let func_src = "package main;\nfunc test (){if a>b{do_thing()}else if a<b {do_other_thing()} else{do_another_thing()};}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(
-            res,
-            "fn test(){\nif a > b {\ndo_thing()\n} else if a < b {\ndo_other_thing()\n} else {\ndo_another_thing()\n}\n}"
+        assert_transformation(
+            "package main;\nfunc test (){if a>b{do_thing()}else if a<b {do_other_thing()} else{do_another_thing()};}",
+            "fn test(){\nif a > b {\ndo_thing()\n} else if a < b {\ndo_other_thing()\n} else {\ndo_another_thing()\n}\n}",
         );
     }
 
     #[test]
     fn transform_if_statement_with_else_and_init() {
-        let func_src =
-            "package main;\nfunc test (){if a,b:=calc(); a>b{do_thing()}else {do_other_thing()};}";
-        let mut parser = Parser::from(func_src);
-        let file = parser
-            .parse_file()
-            .inspect_err(|e| eprintln!("{e:?}"))
-            .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
-        assert_eq!(
-            res,
-            "fn test(){\n{\nlet mut (a, b) = calc();\nif a > b {\ndo_thing()\n} else {\ndo_other_thing()\n}\n}\n}"
+        assert_transformation(
+            "package main;\nfunc test (){if a,b:=calc(); a>b{do_thing()}else {do_other_thing()};}",
+            "fn test(){\n{\nlet mut (a, b) = calc();\nif a > b {\ndo_thing()\n} else {\ndo_other_thing()\n}\n}\n}",
         );
     }
 }
