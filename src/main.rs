@@ -3,9 +3,9 @@ pub mod name_resolution;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
-    ArrayType, BlockStmt, ConstSpec, Decl, DeclStmt, Declaration, Expression, File, FuncLit,
-    IfStmt, Import, Index, InstantiatedType, MapType, Selector, ShortVarDecl, SliceType, Statement,
-    StructType, Type, TypeSpec, VarSpec,
+    ArrayType, BlockStmt, ConstSpec, Decl, DeclStmt, Declaration, Expression, File, ForStmt,
+    FuncLit, IfStmt, Import, Index, InstantiatedType, MapType, Selector, ShortVarDecl, SliceType,
+    Statement, StructType, Type, TypeSpec, VarSpec,
 };
 use gosyn::ast::{FuncDecl, InterfaceType};
 use name_resolution::Context;
@@ -604,6 +604,7 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
         },
         Statement::ShortVarDecl(decl) => convert_short_variable_decl(decl, context),
         Statement::If(if_stmt) => convert_if_stmt(if_stmt, context),
+        Statement::For(for_stmt) => convert_for_stmt(for_stmt, context),
         _ => unimplemented![],
     }
 }
@@ -636,6 +637,32 @@ fn convert_if_stmt(if_stmt: &IfStmt, context: &mut Context) -> String {
         format!("{{\n{init}\nif {cond} {body}{else_}\n}}")
     } else {
         format!("if {cond} {body}{else_}")
+    }
+}
+
+fn convert_for_stmt(for_stmt: &ForStmt, context: &mut Context) -> String {
+    let (loop_keyword, condition) = if let Some(cond) = &for_stmt.cond {
+        ("while", convert_stmt(cond, context))
+    } else {
+        ("loop", String::new())
+    };
+
+    let mut body = convert_block_stmt(&for_stmt.body, context);
+    if let Some(post) = &for_stmt.post {
+        let post = convert_stmt(post, context);
+        // We run the post condition at the end of the body, it's not as clean but it does the same job
+        // TODO Check how this will work with break statements
+        body = format!("{{\n{body}\n{post}\n}}");
+    }
+
+    let loop_stmt = format!("{loop_keyword} {condition}{body}");
+
+    if let Some(init) = &for_stmt.init {
+        let init = convert_stmt(init, context);
+        // We must put the init statement and following for block in it's own scope as variables declared in go init statements are local to the scope of the for statement they are declared for, hence the extra surrounding braces.
+        format!("{{\n{init}\n{loop_stmt}\n}}")
+    } else {
+        loop_stmt
     }
 }
 
@@ -1025,6 +1052,38 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (funcs []func_t){funcs[0]()}",
             "fn test(funcs: &[func_t]){\nfuncs[0]()\n}",
+        );
+    }
+
+    #[test]
+    fn transform_empty_for_loop() {
+        assert_transformation(
+            "package main;\nfunc test (){for{}}",
+            "fn test(){\nloop {\n\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_for_loop_with_cond() {
+        assert_transformation(
+            "package main;\nfunc test (){for i<10 {}}",
+            "fn test(){\nwhile i < 10{\n\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_for_loop_with_init_and_cond() {
+        assert_transformation(
+            "package main;\nfunc test (){for i:=0; i<10; {}}",
+            "fn test(){\n{\nlet mut i = 0;\nwhile i < 10{\n\n}\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_for_loop_with_init_and_cond_and_post() {
+        assert_transformation(
+            "package main;\nfunc test (){for i:=0; i<10;i+=1 {}}",
+            "fn test(){\n{\nlet mut i = 0;\nwhile i < 10{\n{\n\n}\ni += 1\n}\n}\n}",
         );
     }
 }
