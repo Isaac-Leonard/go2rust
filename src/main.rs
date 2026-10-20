@@ -236,21 +236,24 @@ fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes {
             let typ = format!["{typ}[{len}]"];
             WithExtraTypes { extras, typ }
         }
-        Type::Map(MapType { key, val, .. }) => {
-            let WithExtraTypes {
-                typ: key,
-                mut extras,
-            } = convert_unnamed_type(key, context);
-            let WithExtraTypes {
-                typ: val,
-                extras: val_extras,
-            } = convert_unnamed_type(val, context);
-            extras.extend(val_extras);
-            let typ = format!["HashMap<{key}, {val}>"];
-            WithExtraTypes { extras, typ }
-        }
+        Type::Map(map_type) => convert_map_type(map_type, context),
         _ => unimplemented![],
     }
+}
+
+fn convert_map_type(map_type: &MapType, context: &mut Context) -> WithExtraTypes {
+    let MapType { key, val, .. } = map_type;
+    let WithExtraTypes {
+        typ: key,
+        mut extras,
+    } = convert_unnamed_type(&key, context);
+    let WithExtraTypes {
+        typ: val,
+        extras: val_extras,
+    } = convert_unnamed_type(&val, context);
+    extras.extend(val_extras);
+    let typ = format!["HashMap<{key}, {val}>"];
+    WithExtraTypes { extras, typ }
 }
 
 fn convert_name(name: &gosyn::ast::NameType) -> String {
@@ -534,9 +537,28 @@ pub fn convert_struct_literal(name: &str, values: &LiteralValue, context: &mut C
     format!("{name} {{\n{fields}\n}}")
 }
 
+pub fn convert_map_literal(map: &MapType, val: &LiteralValue, context: &mut Context) -> String {
+    let key_type = convert_unnamed_type(&map.key, context).typ;
+    let val_type = convert_unnamed_type(&map.val, context).typ;
+    let mut contents = vec![];
+    for KeyedElement { key, val } in &val.values {
+        let key = key.as_ref().expect("unkeyed map found");
+        let key = convert_element(key, context);
+        let val = convert_element(val, context);
+        contents.push((key, val));
+    }
+    let contents = contents
+        .into_iter()
+        .map(|(key, value)| format!("map.insert({key}, {value});"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{{\nlet mut map = HashMap::<{key_type}, {val_type}>::new();\n{contents}\nmap\n}}")
+}
+
 pub fn convert_composite_literal(lit: &CompositeLit, context: &mut Context) -> String {
     match &*lit.typ {
         Expression::Ident(name) => convert_struct_literal(&name.name, &lit.val, context),
+        Expression::Type(Type::Map(map)) => convert_map_literal(map, &lit.val, context),
         _ => unimplemented![],
     }
 }
@@ -1138,6 +1160,22 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (){Point{x:4,y:2}}",
             "fn test(){\nPoint {\nx: 4,\ny: 2,\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_map_literal_empty() {
+        assert_transformation(
+            "package main;\nfunc test (){map[string]int{}}",
+            "fn test(){\n{\nlet mut map = HashMap::<string, int>::new();\n\nmap\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_map_literal_with_elements() {
+        assert_transformation(
+            "package main;\nfunc test (){map[string]int{\"first\":1,\"second\":2}}",
+            "fn test(){\n{\nlet mut map = HashMap::<string, int>::new();\nmap.insert(\"first\", 1);\nmap.insert(\"second\", 2);\nmap\n}\n}",
         );
     }
 }
