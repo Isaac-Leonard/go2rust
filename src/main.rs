@@ -401,7 +401,13 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
             }
         };
     }
-
+    if let Some(recv) = &func.recv {
+        let name = &recv.parameters[0].identifiers.first();
+        match name {
+            None => params.insert(0, "&self".to_string()),
+            Some(name) => params.insert(0, format!("{ }:&mut Self", &name.name)),
+        }
+    }
     let params = params.join(", ");
 
     let mut result = vec![];
@@ -431,12 +437,28 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
         }
     };
 
-    if let Some(body) = &func.body {
+    let recv = &func.recv;
+
+    let func = if let Some(body) = &func.body {
         let statements = convert_block_stmt(body, context);
         // Note that `convert_block_stmt` wraps the block in braces so we don't need to wrap the body of the function in braces here
         format!("fn {name}{type_params}({params}){result}{statements}")
     } else {
         format!("unsafe extern \"C\" {{fn {name}{type_params}({params}){result};}}")
+    };
+    if let Some(recv) = recv {
+        let recv_type = &recv.parameters[0].typ;
+        let recv_type = match recv_type {
+            Type::Name(_) => recv_type,
+            Type::Pointer(typ) => &*typ.typ,
+            _ => unreachable!(
+                "Reciever types can only be a defined type or pointer to a defined type"
+            ),
+        };
+        let recv_type = convert_unnamed_type(recv_type, context).typ;
+        format!("impl {recv_type} {{\n{func}\n}}")
+    } else {
+        func
     }
 }
 
@@ -1274,6 +1296,22 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (){y:=*x}",
             "fn test(){\nlet mut y = *x;\n}",
+        );
+    }
+
+    #[test]
+    fn transform_method_declaration_with_unnamed_reciever() {
+        assert_transformation(
+            "package main;\nfunc(*Box) test (){}",
+            "impl Box {\nfn test(&self){\n\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_method_declaration_with_named_reciever() {
+        assert_transformation(
+            "package main;\nfunc(b *Box) test (){}",
+            "impl Box {\nfn test(b:&mut Self){\n\n}\n}",
         );
     }
 }
