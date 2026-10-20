@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
     ArrayType, BlockStmt, ConstSpec, Decl, DeclStmt, Declaration, Expression, File, FuncLit,
-    IfStmt, Import, InstantiatedType, MapType, ShortVarDecl, SliceType, Statement, StructType,
-    Type, TypeSpec, VarSpec,
+    IfStmt, Import, InstantiatedType, MapType, Selector, ShortVarDecl, SliceType, Statement,
+    StructType, Type, TypeSpec, VarSpec,
 };
 use gosyn::ast::{FuncDecl, InterfaceType};
 use name_resolution::Context;
@@ -511,6 +511,12 @@ pub fn convert_function_literal(func: &FuncLit, context: &mut Context) -> String
     format!("|{params}|{result}{statements}")
 }
 
+pub fn convert_selector(selector: &Selector, context: &mut Context) -> String {
+    let left = convert_expr(&selector.x, context);
+    let right = &selector.sel.name;
+    format!("{left}.{right}")
+}
+
 pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
     match expr {
         Expression::Ident(ident) => ident.name.clone(),
@@ -541,6 +547,7 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
             format!("{func}({args})")
         }
         Expression::FuncLit(func) => convert_function_literal(func, context),
+        Expression::Selector(selector) => convert_selector(selector, context),
         _ => unimplemented![],
     }
 }
@@ -967,10 +974,26 @@ mod tests {
     }
 
     #[test]
-    fn transform_function_literal_with_return_type() {
+    fn transform_simple_selector() {
         assert_transformation(
-            "package main;\nfunc test (){a=func(a, b i64)i64{a+b}}",
-            "fn test(){\na = |a: i64, b: i64|->i64{\na + b\n}\n}",
+            "package main;\nfunc test (box square){box.side_length}",
+            "fn test(box: square){\nbox.side_length\n}",
+        );
+    }
+
+    #[test]
+    fn transform_selector_after_call() {
+        assert_transformation(
+            "package main;\nfunc test (){get_box().side_length}",
+            "fn test(){\nget_box().side_length\n}",
+        );
+    }
+
+    #[test]
+    fn transform_call_from_selector() {
+        assert_transformation(
+            "package main;\nfunc test (box square){box.side_length()}",
+            "fn test(box: square){\nbox.side_length()\n}",
         );
     }
 }
