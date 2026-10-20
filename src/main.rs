@@ -656,6 +656,10 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
         Expression::Selector(selector) => convert_selector(selector, context),
         Expression::Index(index) => convert_index_expr(index, context),
         Expression::CompositeLit(lit) => convert_composite_literal(lit, context),
+        Expression::Star(pointer) => {
+            let expr = convert_expr(&pointer.right, context);
+            format!("*{expr}")
+        }
         _ => unimplemented![],
     }
 }
@@ -1262,6 +1266,14 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (){y:=&x}",
             "fn test(){\nlet mut y = &x;\n}",
+        );
+    }
+
+    #[test]
+    fn transform_pointer_dereference() {
+        assert_transformation(
+            "package main;\nfunc test (){y:=*x}",
+            "fn test(){\nlet mut y = *x;\n}",
         );
     }
 }
