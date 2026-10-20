@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
     ArrayType, BlockStmt, ConstSpec, Decl, DeclStmt, Declaration, Expression, File, FuncLit,
-    IfStmt, Import, InstantiatedType, MapType, Selector, ShortVarDecl, SliceType, Statement,
+    IfStmt, Import, Index, InstantiatedType, MapType, Selector, ShortVarDecl, SliceType, Statement,
     StructType, Type, TypeSpec, VarSpec,
 };
 use gosyn::ast::{FuncDecl, InterfaceType};
@@ -517,6 +517,12 @@ pub fn convert_selector(selector: &Selector, context: &mut Context) -> String {
     format!("{left}.{right}")
 }
 
+fn convert_index_expr(index: &Index, context: &mut Context) -> String {
+    let left = convert_expr(&index.left, context);
+    let index = convert_expr(&index.index, context);
+    format!("{left}[{index}]")
+}
+
 pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
     match expr {
         Expression::Ident(ident) => ident.name.clone(),
@@ -548,6 +554,7 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
         }
         Expression::FuncLit(func) => convert_function_literal(func, context),
         Expression::Selector(selector) => convert_selector(selector, context),
+        Expression::Index(index) => convert_index_expr(index, context),
         _ => unimplemented![],
     }
 }
@@ -994,6 +1001,30 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (box square){box.side_length()}",
             "fn test(box: square){\nbox.side_length()\n}",
+        );
+    }
+
+    #[test]
+    fn transform_simple_index() {
+        assert_transformation(
+            "package main;\nfunc test (arr []things){arr[0]}",
+            "fn test(arr: &[things]){\narr[0]\n}",
+        );
+    }
+
+    #[test]
+    fn transform_index_after_call() {
+        assert_transformation(
+            "package main;\nfunc test (){get_array()[index]}",
+            "fn test(){\nget_array()[index]\n}",
+        );
+    }
+
+    #[test]
+    fn transform_call_from_index() {
+        assert_transformation(
+            "package main;\nfunc test (funcs []func_t){funcs[0]()}",
+            "fn test(funcs: &[func_t]){\nfuncs[0]()\n}",
         );
     }
 }
