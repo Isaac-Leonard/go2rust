@@ -3,9 +3,9 @@ pub mod name_resolution;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
-    ArrayType, BlockStmt, ConstSpec, Decl, DeclStmt, Declaration, Expression, File, IfStmt, Import,
-    InstantiatedType, MapType, ShortVarDecl, SliceType, Statement, StructType, Type, TypeSpec,
-    VarSpec,
+    ArrayType, BlockStmt, ConstSpec, Decl, DeclStmt, Declaration, Expression, File, FuncLit,
+    IfStmt, Import, InstantiatedType, MapType, ShortVarDecl, SliceType, Statement, StructType,
+    Type, TypeSpec, VarSpec,
 };
 use gosyn::ast::{FuncDecl, InterfaceType};
 use name_resolution::Context;
@@ -435,6 +435,82 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
     }
 }
 
+pub fn convert_function_literal(func: &FuncLit, context: &mut Context) -> String {
+    let mut extras = vec![];
+    let mut params = vec![];
+    for param in &func.typ.params.parameters {
+        let WithExtraTypes {
+            typ,
+            extras: param_extras,
+        } = convert_unnamed_type(&param.typ, context);
+        extras.extend(param_extras);
+
+        match param.identifiers.as_slice() {
+            [] => {
+                // We convert variadic parameters into vectors for now
+                if param.variadic.is_some() {
+                    params.push(format!("_: Vec<{typ}>"));
+                } else {
+                    params.push(format!("_: {typ}"));
+                }
+            }
+            [name] => {
+                let name = &name.name;
+                // We convert variadic parameters into vectors for now
+                if param.variadic.is_some() {
+                    params.push(format!("{name}: Vec<{typ}>"));
+                } else {
+                    params.push(format!("{name}: {typ}"));
+                }
+            }
+            names => {
+                for (index, name) in names.iter().enumerate() {
+                    let name = &name.name;
+                    // We convert variadic parameters into vectors for now
+                    if param.variadic.is_some() && index == names.len() - 1 {
+                        params.push(format!("{name}: Vec<{typ}>"));
+                    } else {
+                        params.push(format!("{name}: {typ}"));
+                    }
+                }
+            }
+        };
+    }
+
+    let params = params.join(", ");
+
+    let mut result = vec![];
+
+    for res in &func.typ.result.parameters {
+        let WithExtraTypes {
+            typ,
+            extras: res_extras,
+        } = convert_unnamed_type(&res.typ, context);
+        extras.extend(res_extras);
+        // unnamed
+        if res.identifiers.is_empty() {
+            result.push(typ.clone());
+        } else {
+            for _name in &res.identifiers {
+                result.push(typ.clone());
+            }
+        }
+    }
+
+    let result = match result.as_slice() {
+        [] => String::new(),
+        [res] => format!("->{res}"),
+        res => {
+            let res = res.join(", ");
+            format!("->({res})")
+        }
+    };
+
+    let statements = convert_block_stmt(&func.body, context);
+    // Note that `convert_block_stmt` wraps the block in braces so we don't need to wrap the body of the function in braces here
+    format!("|{params}|{result}{statements}")
+}
+
 pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
     match expr {
         Expression::Ident(ident) => ident.name.clone(),
@@ -464,6 +540,7 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
                 .join(", ");
             format!("{func}({args})")
         }
+        Expression::FuncLit(func) => convert_function_literal(func, context),
         _ => unimplemented![],
     }
 }
@@ -878,6 +955,22 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (){if a,b:=calc(); a>b{do_thing()}else {do_other_thing()};}",
             "fn test(){\n{\nlet mut (a, b) = calc();\nif a > b {\ndo_thing()\n} else {\ndo_other_thing()\n}\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_function_literal() {
+        assert_transformation(
+            "package main;\nfunc test (){a=func(a, b i64){a+b}}",
+            "fn test(){\na = |a: i64, b: i64|{\na + b\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_function_literal_with_return_type() {
+        assert_transformation(
+            "package main;\nfunc test (){a=func(a, b i64)i64{a+b}}",
+            "fn test(){\na = |a: i64, b: i64|->i64{\na + b\n}\n}",
         );
     }
 }
