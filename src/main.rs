@@ -3,9 +3,10 @@ pub mod name_resolution;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
-    ArrayType, BlockStmt, ConstSpec, Decl, DeclStmt, Declaration, Expression, File, ForStmt,
-    FuncLit, IfStmt, Import, Index, InstantiatedType, MapType, Selector, ShortVarDecl, SliceType,
-    Statement, StructType, Type, TypeSpec, VarSpec,
+    ArrayType, BlockStmt, CompositeLit, ConstSpec, Decl, DeclStmt, Declaration, Element,
+    Expression, File, ForStmt, FuncLit, IfStmt, Import, Index, InstantiatedType, KeyedElement,
+    LiteralValue, MapType, RangeStmt, Selector, ShortVarDecl, SliceType, Statement, StructType,
+    Type, TypeSpec, VarSpec,
 };
 use gosyn::ast::{FuncDecl, InterfaceType};
 use name_resolution::Context;
@@ -511,6 +512,42 @@ pub fn convert_function_literal(func: &FuncLit, context: &mut Context) -> String
     format!("|{params}|{result}{statements}")
 }
 
+pub fn convert_struct_literal(name: &str, values: &LiteralValue, context: &mut Context) -> String {
+    let mut fields = vec![];
+    for KeyedElement { key, val } in &values.values {
+        let key = key.as_ref().expect(&format!(
+            "cannot handle unnamed fields in struct literals, at {}",
+            values.pos.0
+        ));
+        // We really should be checking that this is an identifier but we assume we are converting valid code.
+        let key = convert_element(key, context);
+        let val = convert_element(val, context);
+        fields.push((key, val))
+    }
+
+    let fields = fields
+        .into_iter()
+        .map(|(key, value)| format!("{key}: {value},"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!("{name} {{\n{fields}\n}}")
+}
+
+pub fn convert_composite_literal(lit: &CompositeLit, context: &mut Context) -> String {
+    match &*lit.typ {
+        Expression::Ident(name) => convert_struct_literal(&name.name, &lit.val, context),
+        _ => unimplemented![],
+    }
+}
+
+fn convert_element(element: &Element, context: &mut Context) -> String {
+    match element {
+        Element::Expr(expr) => convert_expr(expr, context),
+        Element::LitValue(lit_value) => unimplemented![],
+    }
+}
+
 pub fn convert_selector(selector: &Selector, context: &mut Context) -> String {
     let left = convert_expr(&selector.x, context);
     let right = &selector.sel.name;
@@ -555,6 +592,7 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
         Expression::FuncLit(func) => convert_function_literal(func, context),
         Expression::Selector(selector) => convert_selector(selector, context),
         Expression::Index(index) => convert_index_expr(index, context),
+        Expression::CompositeLit(lit) => convert_composite_literal(lit, context),
         _ => unimplemented![],
     }
 }
@@ -1084,6 +1122,22 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (){for i:=0; i<10;i+=1 {}}",
             "fn test(){\n{\nlet mut i = 0;\nwhile i < 10{\n{\n\n}\ni += 1\n}\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_empty_struct_literal() {
+        assert_transformation(
+            "package main;\nfunc test (){Point{}}",
+            "fn test(){\nPoint {\n\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_struct_literal_with_named_fields() {
+        assert_transformation(
+            "package main;\nfunc test (){Point{x:4,y:2}}",
+            "fn test(){\nPoint {\nx: 4,\ny: 2,\n}\n}",
         );
     }
 }
