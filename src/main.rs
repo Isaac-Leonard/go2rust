@@ -625,9 +625,12 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
         Expression::Ident(ident) => ident.name.clone(),
         Expression::Operation(op) => {
             let x = convert_expr(&op.x, context);
-            let y = convert_expr(op.y.as_ref().unwrap(), context);
+            let y = op.y.as_ref().map(|y| convert_expr(y, context));
             let op: &str = op.op.into();
-            format!("{x} {op} {y}")
+            match y {
+                Some(y) => format!("{x} {op} {y}"),
+                None => format!("{op}{x}"),
+            }
         }
         Expression::BasicLit(lit) => lit.value.clone(),
         Expression::Paren(expr) => {
@@ -1246,6 +1249,19 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (){[]int{4,5}}",
             "fn test(){\n{\nlet array: [int; 2] = [4, 5];\narray\n}.as_slice()\n}",
+        );
+    }
+
+    #[test]
+    fn transform_unary_sub() {
+        assert_transformation("package main;\nfunc test (){-4}", "fn test(){\n-4\n}");
+    }
+
+    #[test]
+    fn transform_reference() {
+        assert_transformation(
+            "package main;\nfunc test (){y:=&x}",
+            "fn test(){\nlet mut y = &x;\n}",
         );
     }
 }
