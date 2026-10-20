@@ -4,9 +4,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
     ArrayType, BasicLit, BlockStmt, CompositeLit, ConstSpec, Decl, DeclStmt, Declaration, Element,
-    Expression, File, ForStmt, FuncLit, IfStmt, Import, Index, InstantiatedType, KeyedElement,
-    LiteralValue, MapType, RangeStmt, Selector, ShortVarDecl, SliceType, Statement, StructType,
-    Type, TypeSpec, VarSpec,
+    Expression, File, ForStmt, FuncLit, FuncType, IfStmt, Import, Index, InstantiatedType,
+    KeyedElement, LiteralValue, MapType, RangeStmt, Selector, ShortVarDecl, SliceType, Statement,
+    StructType, Type, TypeSpec, VarSpec,
 };
 use gosyn::ast::{FuncDecl, InterfaceType};
 use gosyn::token::LitKind;
@@ -248,10 +248,76 @@ fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes {
             let typ = format!("({typ})");
             WithExtraTypes { typ, extras }
         }
-        Type::Function(func_type) => todo!(),
+        Type::Function(func_type) => convert_func_type(func_type, context),
         Type::Channel(channel_type) => todo!(),
         Type::Interface(interface_type) => todo!(),
     }
+}
+
+pub fn convert_func_type(func_type: &FuncType, context: &mut Context) -> WithExtraTypes {
+    let mut extras = vec![];
+
+    let mut params = vec![];
+    for param in &func_type.params.parameters {
+        let WithExtraTypes {
+            typ,
+            extras: param_extras,
+        } = convert_unnamed_type(&param.typ, context);
+        extras.extend(param_extras);
+
+        // Rust Fn types don't take name parameters so we only use the types here but we still must check each variant
+        match param.identifiers.as_slice() {
+            [] | [_] => {
+                // We convert variadic parameters into vectors for now
+                if param.variadic.is_some() {
+                    params.push(format!("Vec<{typ}>"));
+                } else {
+                    params.push(format!("{typ}"));
+                }
+            }
+            names => {
+                for (index, _) in names.iter().enumerate() {
+                    // We convert variadic parameters into vectors for now
+                    if param.variadic.is_some() && index == names.len() - 1 {
+                        params.push(format!("Vec<{typ}>"));
+                    } else {
+                        params.push(format!("{typ}"));
+                    }
+                }
+            }
+        };
+    }
+    let params = params.join(", ");
+
+    let mut result = vec![];
+
+    for res in &func_type.result.parameters {
+        let WithExtraTypes {
+            typ,
+            extras: res_extras,
+        } = convert_unnamed_type(&res.typ, context);
+        extras.extend(res_extras);
+        // unnamed
+        if res.identifiers.is_empty() {
+            result.push(typ.clone());
+        } else {
+            for _name in &res.identifiers {
+                result.push(typ.clone());
+            }
+        }
+    }
+
+    let result = match result.as_slice() {
+        [] => String::new(),
+        [res] => format!("->{res}"),
+        res => {
+            let res = res.join(", ");
+            format!("->({res})")
+        }
+    };
+
+    let typ = format!("Fn({params}){result}");
+    WithExtraTypes { typ, extras }
 }
 
 fn convert_map_type(map_type: &MapType, context: &mut Context) -> WithExtraTypes {
@@ -1340,6 +1406,38 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (b (Box)){}",
             "fn test(b: (Box)){\n\n}",
+        );
+    }
+
+    #[test]
+    fn transform_func_type_empty() {
+        assert_transformation(
+            "package main;\nfunc test (f func()){}",
+            "fn test(f: Fn()){\n\n}",
+        );
+    }
+
+    #[test]
+    fn transform_func_type_with_unnamed_params() {
+        assert_transformation(
+            "package main;\nfunc test (f func(i64,string)){}",
+            "fn test(f: Fn(i64, string)){\n\n}",
+        );
+    }
+
+    #[test]
+    fn transform_func_type_with_named_params() {
+        assert_transformation(
+            "package main;\nfunc test (f func(first, second string)){}",
+            "fn test(f: Fn(string, string)){\n\n}",
+        );
+    }
+
+    #[test]
+    fn transform_func_type_with_return_type() {
+        assert_transformation(
+            "package main;\nfunc test (f func()string){}",
+            "fn test(f: Fn()->string){\n\n}",
         );
     }
 }
