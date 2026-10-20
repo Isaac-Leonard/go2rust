@@ -555,10 +555,27 @@ pub fn convert_map_literal(map: &MapType, val: &LiteralValue, context: &mut Cont
     format!("{{\nlet mut map = HashMap::<{key_type}, {val_type}>::new();\n{contents}\nmap\n}}")
 }
 
+pub fn convert_array_literal(arr: &ArrayType, val: &LiteralValue, context: &mut Context) -> String {
+    let el_type = convert_unnamed_type(&arr.typ, context).typ;
+    let len = convert_expr(&arr.len, context);
+    let mut elements = vec![];
+    for KeyedElement { key, val } in &val.values {
+        if key.is_some() {
+            unimplemented!("keyed array or slice literals are not supported")
+        }
+
+        let val = convert_element(val, context);
+        elements.push(val);
+    }
+    let elements = elements.join(", ");
+    format!("{{\nlet array: [{el_type}; {len}] = [{elements}];\narray\n}}")
+}
+
 pub fn convert_composite_literal(lit: &CompositeLit, context: &mut Context) -> String {
     match &*lit.typ {
         Expression::Ident(name) => convert_struct_literal(&name.name, &lit.val, context),
         Expression::Type(Type::Map(map)) => convert_map_literal(map, &lit.val, context),
+        Expression::Type(Type::Array(arr)) => convert_array_literal(arr, &lit.val, context),
         _ => unimplemented![],
     }
 }
@@ -1176,6 +1193,22 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (){map[string]int{\"first\":1,\"second\":2}}",
             "fn test(){\n{\nlet mut map = HashMap::<string, int>::new();\nmap.insert(\"first\", 1);\nmap.insert(\"second\", 2);\nmap\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_array_literal_empty() {
+        assert_transformation(
+            "package main;\nfunc test (){[0]int{}}",
+            "fn test(){\n{\nlet array: [int; 0] = [];\narray\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_array_literal_with_elements() {
+        assert_transformation(
+            "package main;\nfunc test (){[2]int{4,5}}",
+            "fn test(){\n{\nlet array: [int; 2] = [4, 5];\narray\n}\n}",
         );
     }
 }
