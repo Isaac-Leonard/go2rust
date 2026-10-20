@@ -238,7 +238,19 @@ fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes {
             WithExtraTypes { extras, typ }
         }
         Type::Map(map_type) => convert_map_type(map_type, context),
-        _ => unimplemented![],
+        Type::Pointer(pointer_type) => {
+            let WithExtraTypes { typ, extras } = convert_unnamed_type(&pointer_type.typ, context);
+            let typ = format!("&mut {typ}");
+            WithExtraTypes { typ, extras }
+        }
+        Type::Paren(paren_type) => {
+            let WithExtraTypes { typ, extras } = convert_unnamed_type(&paren_type.typ, context);
+            let typ = format!("({typ})");
+            WithExtraTypes { typ, extras }
+        }
+        Type::Function(func_type) => todo!(),
+        Type::Channel(channel_type) => todo!(),
+        Type::Interface(interface_type) => todo!(),
     }
 }
 
@@ -1312,6 +1324,22 @@ mod tests {
         assert_transformation(
             "package main;\nfunc(b *Box) test (){}",
             "impl Box {\nfn test(b:&mut Self){\n\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_pointer_type() {
+        assert_transformation(
+            "package main;\nfunc test (b *Box){}",
+            "fn test(b: &mut Box){\n\n}",
+        );
+    }
+
+    #[test]
+    fn transform_paren_type() {
+        assert_transformation(
+            "package main;\nfunc test (b (Box)){}",
+            "fn test(b: (Box)){\n\n}",
         );
     }
 }
