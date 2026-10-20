@@ -3,12 +3,13 @@ pub mod name_resolution;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gosyn::ast::{
-    ArrayType, BlockStmt, CompositeLit, ConstSpec, Decl, DeclStmt, Declaration, Element,
+    ArrayType, BasicLit, BlockStmt, CompositeLit, ConstSpec, Decl, DeclStmt, Declaration, Element,
     Expression, File, ForStmt, FuncLit, IfStmt, Import, Index, InstantiatedType, KeyedElement,
     LiteralValue, MapType, RangeStmt, Selector, ShortVarDecl, SliceType, Statement, StructType,
     Type, TypeSpec, VarSpec,
 };
 use gosyn::ast::{FuncDecl, InterfaceType};
+use gosyn::token::LitKind;
 use name_resolution::Context;
 
 fn main() {
@@ -571,11 +572,31 @@ pub fn convert_array_literal(arr: &ArrayType, val: &LiteralValue, context: &mut 
     format!("{{\nlet array: [{el_type}; {len}] = [{elements}];\narray\n}}")
 }
 
+pub fn convert_slice_literal(
+    slice: &SliceType,
+    val: &LiteralValue,
+    context: &mut Context,
+) -> String {
+    let len = Expression::BasicLit(BasicLit {
+        pos: 0,
+        kind: LitKind::Integer,
+        value: val.values.len().to_string(),
+    });
+    let array_type = ArrayType {
+        pos: (0, 0),
+        len: Box::new(len),
+        typ: slice.typ.clone(),
+    };
+    let backing_array = convert_array_literal(&array_type, val, context);
+    format!("{backing_array}.as_slice()")
+}
+
 pub fn convert_composite_literal(lit: &CompositeLit, context: &mut Context) -> String {
     match &*lit.typ {
         Expression::Ident(name) => convert_struct_literal(&name.name, &lit.val, context),
         Expression::Type(Type::Map(map)) => convert_map_literal(map, &lit.val, context),
         Expression::Type(Type::Array(arr)) => convert_array_literal(arr, &lit.val, context),
+        Expression::Type(Type::Slice(slice)) => convert_slice_literal(slice, &lit.val, context),
         _ => unimplemented![],
     }
 }
@@ -1209,6 +1230,22 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (){[2]int{4,5}}",
             "fn test(){\n{\nlet array: [int; 2] = [4, 5];\narray\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_slice_literal_empty() {
+        assert_transformation(
+            "package main;\nfunc test (){[]int{}}",
+            "fn test(){\n{\nlet array: [int; 0] = [];\narray\n}.as_slice()\n}",
+        );
+    }
+
+    #[test]
+    fn transform_slice_literal_with_elements() {
+        assert_transformation(
+            "package main;\nfunc test (){[]int{4,5}}",
+            "fn test(){\n{\nlet array: [int; 2] = [4, 5];\narray\n}.as_slice()\n}",
         );
     }
 }
