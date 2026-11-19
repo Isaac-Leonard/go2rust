@@ -773,7 +773,9 @@ pub fn convert_composite_literal(lit: &CompositeLit, context: &mut Context) -> S
         Expression::Type(Type::Map(map)) => convert_map_literal(map, &lit.val, context),
         Expression::Type(Type::Array(arr)) => convert_array_literal(arr, &lit.val, context),
         Expression::Type(Type::Slice(slice)) => convert_slice_literal(slice, &lit.val, context),
-        _ => unimplemented![],
+        other => unimplemented![
+            "Not all composite literals can be transformed yet, failed to convert {other:?}"
+        ],
     }
 }
 
@@ -1419,7 +1421,7 @@ mod tests {
     fn transform_short_variable_declaration_with_multi_name() {
         assert_transformation(
             "package main;\nfunc test (){ok, err:=calculate()}",
-            "fn test(){\nlet mut (ok, err) = calculate();\n}",
+            "fn test(){\nlet (mut ok, mut err) = calculate();\n}",
         );
     }
 
@@ -1427,7 +1429,7 @@ mod tests {
     fn transform_short_variable_declaration_with_multi_name_and_expression() {
         assert_transformation(
             "package main;\nfunc test (){ok, err:=2, 5}",
-            "fn test(){\nlet mut (ok, err) = (2, 5);\n}",
+            "fn test(){\nlet (mut ok, mut err) = (2, 5);\n}",
         );
     }
 
@@ -1459,7 +1461,7 @@ mod tests {
     fn transform_if_statement_with_else_and_init() {
         assert_transformation(
             "package main;\nfunc test (){if a,b:=calc(); a>b{do_thing()}else {do_other_thing()};}",
-            "fn test(){\n{\nlet mut (a, b) = calc();\nif a > b {\ndo_thing()\n} else {\ndo_other_thing()\n}\n}\n}",
+            "fn test(){\n{\nlet (mut a, mut b) = calc();\nif a > b {\ndo_thing()\n} else {\ndo_other_thing()\n}\n}\n}",
         );
     }
 
