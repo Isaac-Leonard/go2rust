@@ -50,23 +50,13 @@ fn main() {
 }
 
 pub fn convert_ast(file: File, context: &mut Context) -> Result<String, String> {
-    let imports = file
-        .imports
-        .iter()
-        .map(|import| convert_import(import, context))
-        .try_fold(String::new(), |a, b| -> Result<String, String> {
-            Ok(a + &b?)
-        })?;
-
     let declarations = file
         .decl
         .iter()
         .map(|decl| convert_decl(decl, context))
-        .try_fold(String::new(), |a, b| -> Result<String, String> {
-            Ok(a + &b?)
-        })?;
+        .collect::<Result<Vec<_>, _>>()?;
 
-    return Ok(imports + &declarations);
+    Ok(declarations.join("\n"))
 }
 
 fn convert_import(import: &Import, _context: &mut Context) -> Result<String, String> {
@@ -145,7 +135,7 @@ pub fn convert_variable_decl(var_decl: &Decl<VarSpec>, context: &mut Context) ->
             extras.extend(var_extras);
             format!(": {typ}")
         } else {
-            String::new()
+            ": _".to_string()
         };
         for (name, value) in spec.name.iter().zip(spec.values.iter()) {
             let name = &name.name;
@@ -179,9 +169,21 @@ pub fn convert_short_variable_decl(decl: &ShortVarDecl, context: &mut Context) -
         .collect::<Vec<_>>();
 
     let names = match names.as_slice() {
-        [name] => name.clone(),
+        [name] => match name.as_str() {
+            // Rust does not let us have mut on _ bindings
+            "_" => name.to_string(),
+            _ => format!("mut {name}"),
+        },
         names => {
-            let names = names.join(", ");
+            let names = names
+                .iter()
+                .map(|name| match name.as_str() {
+                    // Rust does not let us have mut on _ bindings
+                    "_" => name.to_string(),
+                    _ => format!("mut {name}"),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("({names})")
         }
     };
@@ -194,7 +196,7 @@ pub fn convert_short_variable_decl(decl: &ShortVarDecl, context: &mut Context) -
         }
     };
 
-    format!("let mut {names} = {values};")
+    format!("let {names} = {values};")
 }
 
 pub struct WithExtraTypes {
@@ -205,7 +207,7 @@ pub struct WithExtraTypes {
 fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> WithExtraTypes {
     match typ {
         Type::Name(t_name) => WithExtraTypes {
-            typ: format!("type {} = {}", name, convert_name(t_name)),
+            typ: format!("type {} = {};", name, convert_name(t_name)),
             extras: vec![],
         },
         Type::Instantiated(InstantiatedType {
@@ -225,13 +227,17 @@ fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> WithExtr
                 .reduce(|a, b| format!("{a}, {b}"));
             let typ = match arguments {
                 Some(arguments) => format!("{typ}<{arguments}>"),
-                None => typ,
+                None => format!("{typ}"),
             };
-            let typ = format!("type {name} = {typ}");
+            let typ = format!("type {name} = {typ};");
             WithExtraTypes { typ, extras }
         }
         Type::Struct(struct_t) => convert_struct(name, struct_t, context),
-        Type::Map(map_type) => convert_map_type(map_type, context),
+        Type::Map(map_type) => {
+            let WithExtraTypes { typ, extras } = convert_map_type(map_type, context);
+            let typ = format!("type {name} = {typ};");
+            WithExtraTypes { extras, typ }
+        }
         other => {
             unimplemented!["Not all types can be transformed yet, failed to transform {other:?}"]
         }
@@ -420,7 +426,14 @@ fn convert_struct(name: &str, typ: &StructType, context: &mut Context) -> WithEx
                 } = convert_unnamed_type(&field.typ, context);
                 extras.extend(field_extras);
                 for name in &field.name {
-                    fields.push(format!("{}: {},", &name.name, typ));
+                    let name = match name.name.as_str() {
+                        // _ is not a valid field name in rust so we must replace it.
+                        // This is hacky but should work for now.
+                        // TODO fix this
+                        "_" => "__",
+                        name => name,
+                    };
+                    fields.push(format!("{name}: {typ},",));
                 }
             }
             Field::Embedded(field) => {
