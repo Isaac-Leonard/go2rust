@@ -90,7 +90,27 @@ pub fn convert_type_decl(type_d: &Decl<TypeSpec>, context: &mut Context) -> Stri
 }
 
 pub fn convert_const_decl(const_decl: &Decl<ConstSpec>, context: &mut Context) -> String {
-    todo!()
+    let mut extras = vec![];
+    let mut declarations = vec![];
+    for spec in &const_decl.specs {
+        let typ = if let Some(typ) = &spec.typ {
+            let WithExtraTypes {
+                typ,
+                extras: const_extras,
+            } = convert_unnamed_type(&typ, context);
+            extras.extend(const_extras);
+            format!(": {typ}")
+        } else {
+            ": _".to_string()
+        };
+        for (name, value) in spec.name.iter().zip(spec.values.iter()) {
+            let name = &name.name;
+            let value = convert_expr(value, context);
+            declarations.push(format!("const {name}{typ} = {value};"))
+        }
+    }
+
+    declarations.join("\n")
 }
 
 /// Converts variable declarations to rust syntax.
@@ -1524,6 +1544,30 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (){ for k, v := range hashmap {} }",
             "fn test(){\nfor (k, v) in hashmap {\n\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_const_single_with_type() {
+        assert_transformation(
+            "package main;\nconst PI float64=3.1415",
+            "const PI: float64 = 3.1415;",
+        );
+    }
+
+    #[test]
+    fn transform_const_two_with_type() {
+        assert_transformation(
+            "package main;\nconst ( PI float64=3.1415\ntau float64 = 6.2832 )",
+            "const PI: float64 = 3.1415;\nconst tau: float64 = 6.2832;",
+        );
+    }
+
+    #[test]
+    fn transform_const_two_without_one_type() {
+        assert_transformation(
+            "package main;\nconst ( PI float64=3.1415\ntau = 6.2832 )",
+            "const PI: float64 = 3.1415;\nconst tau: _ = 6.2832;",
         );
     }
 }
