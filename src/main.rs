@@ -222,7 +222,10 @@ fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> WithExtr
             WithExtraTypes { typ, extras }
         }
         Type::Struct(struct_t) => convert_struct(name, struct_t, context),
-        _ => unimplemented![],
+        Type::Map(map_type) => convert_map_type(map_type, context),
+        other => {
+            unimplemented!["Not all types can be transformed yet, failed to transform {other:?}"]
+        }
     }
 }
 
@@ -755,7 +758,32 @@ pub fn convert_composite_literal(lit: &CompositeLit, context: &mut Context) -> S
 fn convert_element(element: &Element, context: &mut Context) -> String {
     match element {
         Element::Expr(expr) => convert_expr(expr, context),
-        Element::LitValue(lit_value) => unimplemented![],
+        Element::LitValue(lit_value) => {
+            let mut elements = vec![];
+            let mut keyed = false;
+            for KeyedElement { key, val } in &lit_value.values {
+                let element = convert_element(val, context);
+                let key = if let Some(key) = key {
+                    keyed = true;
+                    let key = convert_element(key, context);
+                    format!("{key}: ")
+                } else {
+                    String::new()
+                };
+                elements.push(format!("{key}{element}"));
+            }
+            let elements = if keyed {
+                elements.join(",\n")
+            } else {
+                elements.join(", ")
+            };
+
+            if keyed {
+                format!("hash_map!{{\n{elements}\n}}")
+            } else {
+                format!("vec![{elements}]")
+            }
+        }
     }
 }
 
