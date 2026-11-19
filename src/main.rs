@@ -6,12 +6,12 @@ pub mod utils;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ast::{
-    ArrayType, BasicLit, BlockStmt, Call, CompositeLit, ConstSpec, Decl, DeclStmt, Declaration,
-    Element, Expression, Field, File, ForStmt, FuncDecl, FuncLit, FuncType, IfStmt, Import, Index,
-    InstantiatedType, InterfaceType, KeyedElement, LiteralValue, MapType, NameType, RangeStmt,
-    Selector, ShortVarDecl, SliceType, Statement, StructType, Type, TypeSpec, VarSpec,
+    ArrayType, BasicLit, BlockStmt, BranchStmt, Call, CompositeLit, ConstSpec, Decl, DeclStmt,
+    Declaration, Element, Expression, Field, File, ForStmt, FuncDecl, FuncLit, FuncType, IfStmt,
+    Import, Index, InstantiatedType, InterfaceType, KeyedElement, LiteralValue, MapType, NameType,
+    RangeStmt, Selector, ShortVarDecl, SliceType, Statement, StructType, Type, TypeSpec, VarSpec,
 };
-use gosyn::token::LitKind;
+use gosyn::token::{Keyword, LitKind};
 use name_resolution::Context;
 use type_inferance::infer_type;
 
@@ -876,6 +876,7 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
         Statement::For(for_stmt) => convert_for_stmt(for_stmt, context),
         Statement::Range(range_stmt) => convert_range_stmt(range_stmt, context),
         Statement::Empty(_) => "{}".to_string(),
+        Statement::Branch(branch) => convert_branch_stmt(branch, context),
         other => unimplemented!["Cannot yet convert {other:?}"],
     }
 }
@@ -959,6 +960,21 @@ fn convert_range_stmt(range_stmt: &RangeStmt, context: &mut Context) -> String {
 
     // TODO We need to find a way to assign the variables outside of the loop scope if a simple "=" operator is used instead of ":=" for the range expression.
     format!("for {decl} in {expr} {body}")
+}
+
+fn convert_branch_stmt(branch: &BranchStmt, context: &mut Context) -> String {
+    let label = branch
+        .ident
+        .as_ref()
+        .map(|label| format!(" '{}", label.name))
+        .unwrap_or_default();
+    let control_flow = match &branch.key {
+        Keyword::Continue => "continue",
+        Keyword::Break => "break",
+        other => panic!("Unexpected keyword {other:?} found in branch statement"),
+    };
+
+    format!("{control_flow}{label};")
 }
 
 #[cfg(test)]
@@ -1568,6 +1584,38 @@ mod tests {
         assert_transformation(
             "package main;\nconst ( PI float64=3.1415\ntau = 6.2832 )",
             "const PI: float64 = 3.1415;\nconst tau: _ = 6.2832;",
+        );
+    }
+
+    #[test]
+    fn transform_break() {
+        assert_transformation(
+            "package main;\nfunc test(){for {break}}",
+            "fn test(){\nloop {\nbreak;\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_break_with_label() {
+        assert_transformation(
+            "package main;\nfunc test(){for {break outter}}",
+            "fn test(){\nloop {\nbreak 'outter;\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_continue() {
+        assert_transformation(
+            "package main;\nfunc test(){for {continue}}",
+            "fn test(){\nloop {\ncontinue;\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_continue_with_label() {
+        assert_transformation(
+            "package main;\nfunc test(){for {continue outter}}",
+            "fn test(){\nloop {\ncontinue 'outter;\n}\n}",
         );
     }
 }
