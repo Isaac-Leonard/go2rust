@@ -1,16 +1,19 @@
+pub mod ast;
 pub mod name_resolution;
+pub mod type_inferance;
+pub mod utils;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use gosyn::ast::{
-    ArrayType, BasicLit, BlockStmt, CompositeLit, ConstSpec, Decl, DeclStmt, Declaration, Element,
-    Expression, File, ForStmt, FuncLit, FuncType, IfStmt, Import, Index, InstantiatedType,
-    KeyedElement, LiteralValue, MapType, RangeStmt, Selector, ShortVarDecl, SliceType, Statement,
-    StructType, Type, TypeSpec, VarSpec,
+use ast::{
+    ArrayType, BasicLit, BlockStmt, Call, CompositeLit, ConstSpec, Decl, DeclStmt, Declaration,
+    Element, Expression, Field, File, ForStmt, FuncDecl, FuncLit, FuncType, IfStmt, Import, Index,
+    InstantiatedType, InterfaceType, KeyedElement, LiteralValue, MapType, NameType, Selector,
+    ShortVarDecl, SliceType, Statement, StructType, Type, TypeSpec, VarSpec,
 };
-use gosyn::ast::{FuncDecl, InterfaceType};
 use gosyn::token::LitKind;
 use name_resolution::Context;
+use type_inferance::infer_type;
 
 fn main() {
     let mut args = std::env::args();
@@ -101,7 +104,7 @@ pub fn convert_variable_decl(var_decl: &Decl<VarSpec>, context: &mut Context) ->
             let WithExtraTypes {
                 typ,
                 extras: var_extras,
-            } = convert_unnamed_type(typ, context);
+            } = convert_unnamed_type(&typ, context);
             extras.extend(var_extras);
             format!(": {typ}")
         } else {
@@ -162,8 +165,7 @@ pub struct WithExtraTypes {
     extras: Vec<String>,
 }
 
-fn convert_named_type(name: &str, typ: &gosyn::ast::Type, context: &mut Context) -> WithExtraTypes {
-    use gosyn::ast::Type;
+fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> WithExtraTypes {
     match typ {
         Type::Name(t_name) => WithExtraTypes {
             typ: format!("type {} = {}", name, convert_name(t_name)),
@@ -197,7 +199,6 @@ fn convert_named_type(name: &str, typ: &gosyn::ast::Type, context: &mut Context)
 }
 
 fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes {
-    use gosyn::ast::Type;
     match typ {
         Type::Name(name) => WithExtraTypes {
             typ: convert_name(name),
@@ -258,7 +259,7 @@ pub fn convert_func_type(func_type: &FuncType, context: &mut Context) -> WithExt
     let mut extras = vec![];
 
     let mut params = vec![];
-    for param in &func_type.params.parameters {
+    for param in &func_type.params {
         let WithExtraTypes {
             typ,
             extras: param_extras,
@@ -291,7 +292,7 @@ pub fn convert_func_type(func_type: &FuncType, context: &mut Context) -> WithExt
 
     let mut result = vec![];
 
-    for res in &func_type.result.parameters {
+    for res in &func_type.result {
         let WithExtraTypes {
             typ,
             extras: res_extras,
@@ -335,10 +336,10 @@ fn convert_map_type(map_type: &MapType, context: &mut Context) -> WithExtraTypes
     WithExtraTypes { extras, typ }
 }
 
-fn convert_name(name: &gosyn::ast::NameType) -> String {
+fn convert_name(name: &NameType) -> String {
     match name {
-        gosyn::ast::NameType::Ident(ident) => ident.name.clone(),
-        gosyn::ast::NameType::Qualified(qual_ident) => {
+        NameType::Ident(ident) => ident.name.clone(),
+        NameType::Qualified(qual_ident) => {
             format!(
                 "{}::{}",
                 qual_ident.package.name, qual_ident.identifier.name
@@ -372,7 +373,7 @@ fn convert_struct(name: &str, typ: &StructType, context: &mut Context) -> WithEx
     let mut fields = vec![];
     for field in &typ.fields {
         match &field.field {
-            gosyn::ast::Field::Named(field) => {
+            Field::Named(field) => {
                 let WithExtraTypes {
                     typ,
                     extras: field_extras,
@@ -382,7 +383,7 @@ fn convert_struct(name: &str, typ: &StructType, context: &mut Context) -> WithEx
                     fields.push(format!("{}: {},", &name.name, typ));
                 }
             }
-            gosyn::ast::Field::Embedded(field) => {
+            Field::Embedded(field) => {
                 let mut extras = vec![];
                 let mut arguments = vec![];
 
@@ -401,8 +402,8 @@ fn convert_struct(name: &str, typ: &StructType, context: &mut Context) -> WithEx
                 };
 
                 let name = match &field.typ {
-                    gosyn::ast::NameType::Ident(name) => &name.name,
-                    gosyn::ast::NameType::Qualified(name) => &name.identifier.name,
+                    NameType::Ident(name) => &name.name,
+                    NameType::Qualified(name) => &name.identifier.name,
                 };
 
                 let typ = convert_name(&field.typ);
@@ -441,7 +442,7 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
     };
 
     let mut params = vec![];
-    for param in &func.typ.params.parameters {
+    for param in &func.typ.params {
         let WithExtraTypes {
             typ,
             extras: param_extras,
@@ -480,7 +481,7 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
         };
     }
     if let Some(recv) = &func.recv {
-        let name = &recv.parameters[0].identifiers.first();
+        let name = &recv[0].identifiers.first();
         match name {
             None => params.insert(0, "&self".to_string()),
             Some(name) => params.insert(0, format!("{ }:&mut Self", &name.name)),
@@ -490,7 +491,7 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
 
     let mut result = vec![];
 
-    for res in &func.typ.result.parameters {
+    for res in &func.typ.result {
         let WithExtraTypes {
             typ,
             extras: res_extras,
@@ -525,7 +526,7 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
         format!("unsafe extern \"C\" {{fn {name}{type_params}({params}){result};}}")
     };
     if let Some(recv) = recv {
-        let recv_type = &recv.parameters[0].typ;
+        let recv_type = &recv[0].typ;
         let recv_type = match recv_type {
             Type::Name(_) => recv_type,
             Type::Pointer(typ) => &*typ.typ,
@@ -543,7 +544,7 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
 pub fn convert_function_literal(func: &FuncLit, context: &mut Context) -> String {
     let mut extras = vec![];
     let mut params = vec![];
-    for param in &func.typ.params.parameters {
+    for param in &func.typ.params {
         let WithExtraTypes {
             typ,
             extras: param_extras,
@@ -586,7 +587,7 @@ pub fn convert_function_literal(func: &FuncLit, context: &mut Context) -> String
 
     let mut result = vec![];
 
-    for res in &func.typ.result.parameters {
+    for res in &func.typ.result {
         let WithExtraTypes {
             typ,
             extras: res_extras,
@@ -620,8 +621,7 @@ pub fn convert_struct_literal(name: &str, values: &LiteralValue, context: &mut C
     let mut fields = vec![];
     for KeyedElement { key, val } in &values.values {
         let key = key.as_ref().expect(&format!(
-            "cannot handle unnamed fields in struct literals, at {}",
-            values.pos.0
+            "cannot handle unnamed fields in struct literals, at ",
         ));
         // We really should be checking that this is an identifier but we assume we are converting valid code.
         let key = convert_element(key, context);
@@ -678,12 +678,10 @@ pub fn convert_slice_literal(
     context: &mut Context,
 ) -> String {
     let len = Expression::BasicLit(BasicLit {
-        pos: 0,
         kind: LitKind::Integer,
         value: val.values.len().to_string(),
     });
     let array_type = ArrayType {
-        pos: (0, 0),
         len: Box::new(len),
         typ: slice.typ.clone(),
     };
@@ -720,6 +718,53 @@ fn convert_index_expr(index: &Index, context: &mut Context) -> String {
     format!("{left}[{index}]")
 }
 
+pub fn convert_call(call: &Call, context: &mut Context) -> String {
+    // TODO Handle passing variadic arguments.
+    // TODO Handle passing rest arguments.
+    // TODO handle builtins
+    match &*call.func {
+        //Expression::Ident(ident) if context.is_builtin(ident) => match ident.name {
+        //     "clear" => convert_clear_call(call.args, context),
+        // },
+        _ => {
+            let func = convert_expr(&call.func, context);
+            if call.dots {
+                unimplemented!("Cannot flatten rest arguments yet");
+            }
+            let args = call
+                .args
+                .iter()
+                .map(|expr| convert_expr(expr, context))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{func}({args})")
+        }
+    }
+}
+
+fn convert_clear_call(args: &[Expression], context: &mut Context) -> String {
+    match args {
+        [arg] => {
+            let typ = infer_type(arg, context);
+            let arg = convert_expr(arg, context);
+            match typ {
+                Type::Map(_) => format!("({arg}).clear()"),
+                Type::Slice(_) => todo![],
+                Type::Name(name_type) => todo!(),
+                Type::Instantiated(instantiated_type) => todo!(),
+                Type::Array(array_type) => todo!(),
+                Type::Function(func_type) => todo!(),
+                Type::Struct(struct_type) => todo!(),
+                Type::Channel(channel_type) => todo!(),
+                Type::Pointer(pointer_type) => todo!(),
+                Type::Interface(interface_type) => todo!(),
+                Type::Paren(paren_type) => todo!(),
+            }
+        }
+        _ => unreachable![],
+    }
+}
+
 pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
     match expr {
         Expression::Ident(ident) => ident.name.clone(),
@@ -737,21 +782,7 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
             let expr = convert_expr(&expr.expr, context);
             format!("({expr})")
         }
-        Expression::Call(call) => {
-            // TODO Handle passing variadic arguments.
-            // TODO Handle passing rest arguments.
-            let func = convert_expr(&call.func, context);
-            if call.dots.is_some() {
-                unimplemented!("Cannot flatten rest arguments yet");
-            }
-            let args = call
-                .args
-                .iter()
-                .map(|expr| convert_expr(expr, context))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{func}({args})")
-        }
+        Expression::Call(call) => convert_call(call, context),
         Expression::FuncLit(func) => convert_function_literal(func, context),
         Expression::Selector(selector) => convert_selector(selector, context),
         Expression::Index(index) => convert_index_expr(index, context),
@@ -760,7 +791,13 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
             let expr = convert_expr(&pointer.right, context);
             format!("*{expr}")
         }
-        _ => unimplemented![],
+        Expression::IndexList(index_list) => todo!(),
+        Expression::Slice(slice) => todo!(),
+        Expression::Ellipsis(ellipsis) => todo!(),
+        Expression::Range(range_expr) => todo!(),
+        Expression::TypeAssert(type_assertion) => todo!(),
+        Expression::List(expressions) => todo!(),
+        Expression::Type(_) => todo!(),
     }
 }
 
@@ -884,7 +921,7 @@ mod tests {
             .parse_file()
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
-        let res = convert_ast(file, &mut Context::default()).unwrap();
+        let res = convert_ast(file.into(), &mut Context::default()).unwrap();
         assert_eq!(res, rust);
     }
 

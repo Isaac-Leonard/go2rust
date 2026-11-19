@@ -1,18 +1,14 @@
-use std::collections::{HashMap, hash_map::Entry};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use gosyn::{
-    ast::{BlockStmt, Call, Declaration, Expression, File, Statement},
-    token::LitKind,
+use crate::ast::{
+    BlockStmt, Call, Declaration, Expression, File, FuncType, Ident, NameType, Statement, Type,
+    TypeElem, TypeParamDecl, TypeTerm,
 };
 
 #[derive(Default)]
 pub struct Context {
-    pub types: HashMap<String, gosyn::ast::Type>,
-    pub variables: HashMap<String, GoValue>,
-}
-
-pub fn resolve_ident<'a>(name: &'a str, context: &'a mut Context) -> Entry<'a, String, GoValue> {
-    context.variables.entry(name.to_string())
+    pub types: HashMap<String, Type>,
+    pub variables: HashMap<String, Option<Type>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,10 +20,10 @@ pub enum GoValue {
     Other,
 }
 
-fn find_use_idents(ast: &File) -> Scope {
+fn find_use_idents(ast: gosyn::ast::File) -> Scope {
     // TODO Have this be an over arching scope for all files and have proper package scopes.
     let mut scope = Scope::new_universe();
-
+    let ast = File::from(ast);
     for decl in &ast.decl {
         match decl {
             Declaration::Const(constants) => {
@@ -37,11 +33,11 @@ fn find_use_idents(ast: &File) -> Scope {
                     }
 
                     if let Some(typ) = &constant.typ {
-                        scope.add_containeds(find_idents_in_type(typ));
+                        scope.add_sub_scopes(find_idents_in_type(typ));
                     }
 
                     for value in &constant.values {
-                        scope.add_containeds(find_idents_in_expression(&value));
+                        scope.add_sub_scopes(find_idents_in_expression(&value));
                     }
                 }
             }
@@ -52,11 +48,11 @@ fn find_use_idents(ast: &File) -> Scope {
                     }
 
                     if let Some(typ) = &variables.typ {
-                        scope.add_containeds(find_idents_in_type(typ));
+                        scope.add_sub_scopes(find_idents_in_type(typ));
                     }
 
                     for value in &variables.values {
-                        scope.add_containeds(find_idents_in_expression(value));
+                        scope.add_sub_scopes(find_idents_in_expression(value));
                     }
                 }
             }
@@ -69,14 +65,14 @@ fn find_use_idents(ast: &File) -> Scope {
                 if let Some(body) = &func_decl.body {
                     find_idents_in_block(body, &mut sub_scope)
                 }
-                scope.add_contained(sub_scope);
+                scope.add_sub_scope(sub_scope);
             }
             Declaration::Type(decl) => {
                 for typ in &decl.specs {
-                    scope.add_contained(typ.name.name.clone());
+                    scope.add_provided(typ.name.name.clone());
                     let mut sub_scope = Scope::default();
-                    sub_scope.add_containeds(find_idents_in_type(&typ.typ));
-                    scope.add_contained(sub_scope);
+                    sub_scope.add_sub_scopes(find_idents_in_type(&typ.typ));
+                    scope.add_sub_scope(sub_scope);
                 }
             }
         }
@@ -86,22 +82,22 @@ fn find_use_idents(ast: &File) -> Scope {
 
 fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
     match statement {
-        Statement::Go(go) => scope.add_containeds(find_idents_in_call(&go.call)),
+        Statement::Go(go) => scope.add_sub_scopes(find_idents_in_call(&go.call)),
         Statement::If(if_stmt) => {
             let mut init_scope = Scope::default();
             if let Some(init) = &if_stmt.init {
                 find_idents_in_statement(init, &mut init_scope);
             }
-            init_scope.add_containeds(find_idents_in_expression(&if_stmt.cond));
+            init_scope.add_sub_scopes(find_idents_in_expression(&if_stmt.cond));
             let mut if_scope = Scope::default();
             find_idents_in_block(&if_stmt.body, &mut if_scope);
-            init_scope.add_contained(if_scope);
+            init_scope.add_sub_scope(if_scope);
             if let Some(else_stmt) = &if_stmt.else_ {
                 let mut else_scope = Scope::default();
                 find_idents_in_statement(else_stmt, &mut else_scope);
-                init_scope.add_contained(else_scope)
+                init_scope.add_sub_scope(else_scope)
             }
-            scope.add_contained(init_scope)
+            scope.add_sub_scope(init_scope)
         }
         Statement::For(for_stmt) => todo!(),
         Statement::Send(send_stmt) => todo!(),
@@ -130,14 +126,10 @@ fn find_idents_in_block(block: &BlockStmt, scope: &mut Scope) {
     }
 }
 
-fn find_idents_in_expression(exp: &Expression) -> Vec<Contained> {
-    use Contained::*;
+fn find_idents_in_expression(exp: &Expression) -> Vec<Scope> {
     match exp {
-        Expression::Ident(ident) => vec![Referenced(ident.name.clone())],
-        Expression::BasicLit(lit) => match lit.kind {
-            LitKind::Ident => vec![Referenced(lit.value.clone())],
-            _ => vec![],
-        },
+        Expression::Ident(ident) => vec![],
+        Expression::BasicLit(lit) => vec![],
         Expression::Index(index) => {
             let left = find_idents_in_expression(&index.left);
             let right = find_idents_in_expression(&index.index);
@@ -180,7 +172,7 @@ fn find_idents_in_expression(exp: &Expression) -> Vec<Contained> {
         Expression::Ellipsis(ellipsis) => todo!(),
         Expression::Selector(selector) => {
             let mut idents = find_idents_in_expression(&selector.x);
-            idents.push(Referenced(selector.sel.name.clone()));
+            // idents.push(Referenced(selector.sel.name.clone()));
             idents
         }
         Expression::Range(range_expr) => find_idents_in_expression(&range_expr.right),
@@ -200,8 +192,7 @@ fn find_idents_in_expression(exp: &Expression) -> Vec<Contained> {
     }
 }
 
-fn find_idents_in_type(typ: &gosyn::ast::Type) -> Vec<Contained> {
-    use gosyn::ast::Type;
+fn find_idents_in_type(typ: &Type) -> Vec<Scope> {
     match typ {
         Type::Map(map_type) => todo!(),
         Type::Array(array_type) => todo!(),
@@ -213,11 +204,11 @@ fn find_idents_in_type(typ: &gosyn::ast::Type) -> Vec<Contained> {
         Type::Interface(interface_type) => todo!(),
         Type::Name(name_type) => todo!(),
         Type::Instantiated(instantiated_type) => todo!(),
-        Type::Paren(typ) => find_idents_in_type(&typ.typ),
+        Type::Paren(typ) => find_idents_in_type(&*typ.typ),
     }
 }
 
-pub fn find_idents_in_call(call: &Call) -> Vec<Contained> {
+pub fn find_idents_in_call(call: &Call) -> Vec<Scope> {
     let mut idents = find_idents_in_expression(&call.func);
     for arg in &call.args {
         idents.extend(find_idents_in_expression(arg));
@@ -228,27 +219,26 @@ pub fn find_idents_in_call(call: &Call) -> Vec<Contained> {
 /// Contains lists of variables declared and used in a given program scope such as the entire program or a function.
 #[derive(Clone, Debug, Default)]
 pub struct Scope {
-    /// Named generics, function arguments or variables declared in this scope
+    //Named generics, or declared types in this scope
+    types: Vec<UnknownType>,
+    /// function arguments or variables declared in this scope
     provided: Vec<String>,
-    /// All identifiers that are refered to in this scope
-    referenced: Vec<String>,
     /// Functions declared in this scope with their own arguments and local variables
     sub_scopes: Vec<Scope>,
 }
 
 impl Scope {
-    pub fn new(provided: Vec<String>, referenced: Vec<String>, sub_scopes: Vec<Scope>) -> Self {
+    pub fn new(types: Vec<UnknownType>, provided: Vec<String>, sub_scopes: Vec<Scope>) -> Self {
         Self {
+            types,
             provided,
-            referenced,
             sub_scopes,
         }
     }
 
     pub fn new_universe() -> Self {
-        Self {
-            provided: vec![
-                // Types:
+        let universe = Self {
+            types: [
                 "any",
                 "bool",
                 "byte",
@@ -271,38 +261,28 @@ impl Scope {
                 "uint32",
                 "uint64",
                 "uintptr",
-                // Constants:
-                "true",
-                "false",
-                "iota",
-                // Zero value:
-                "nil",
-                // Functions:
-                "append",
-                "cap",
-                "clear",
-                "close",
-                "complex",
-                "copy",
-                "delete",
-                "imag",
-                "len",
-                "make",
-                "max",
-                "min",
-                "new",
-                "panic",
-                "print",
-                "println",
-                "real",
-                "recover",
             ]
             .into_iter()
-            .map(|x| x.to_string())
+            .map(|name| UnknownType {
+                name: name.to_string(),
+                typ: Type::Name(NameType::Ident(Ident {
+                    name: "Unknown".to_string(),
+                })),
+            })
             .collect(),
-            referenced: vec![],
+            provided: [
+                "Append", "Copy", "Clear", "Close", "complex", "real", "imag", "delete", "len",
+                "cap", "make", "min", "max", "new", "panic", "recover", "print",
+                "println", //functions
+                "true", "false", "iota", // Constants:
+                "nil",  // Zero value:
+            ]
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect(),
             sub_scopes: vec![],
-        }
+        };
+        universe
     }
 
     pub fn add_provided(&mut self, provided: String) {
@@ -313,14 +293,6 @@ impl Scope {
         self.provided.extend(provided);
     }
 
-    pub fn add_referenced(&mut self, referenced: String) {
-        self.referenced.push(referenced);
-    }
-
-    pub fn add_references<I: IntoIterator<Item = String>>(&mut self, references: I) {
-        self.referenced.extend(references);
-    }
-
     pub fn add_sub_scope(&mut self, sub_scope: Scope) {
         self.sub_scopes.push(sub_scope);
     }
@@ -328,40 +300,31 @@ impl Scope {
     pub fn add_sub_scopes(&mut self, sub_scopes: Vec<Scope>) {
         self.sub_scopes.extend(sub_scopes);
     }
+}
 
-    pub fn add_contained<C: Into<Contained>>(&mut self, contained: C) {
-        let contained = contained.into();
-        match contained {
-            Contained::Referenced(reference) => self.referenced.push(reference),
-            Contained::SubScope(sub_scope) => self.sub_scopes.push(sub_scope),
-        }
-    }
+pub enum InferedType {
+    Unknown(Rc<RefCell<UnknownVariable>>),
+    Add(Box<InferedType>, GoValue),
+    Type(Type),
+}
 
-    pub fn add_containeds<C: Into<Contained>, I: IntoIterator<Item = C>>(&mut self, contained: I) {
-        for contained in contained {
-            let contained = contained.into();
-            match contained {
-                Contained::Referenced(reference) => self.referenced.push(reference),
-                Contained::SubScope(sub_scope) => self.sub_scopes.push(sub_scope),
-            }
-        }
-    }
+pub enum GoType {
+    Bool,
+    String,
+    Declared(Type),
+}
+
+pub struct UnknownVariable {
+    name: String,
+    typ: Option<Type>,
 }
 
 #[derive(Clone, Debug)]
-pub enum Contained {
-    Referenced(String),
-    SubScope(Scope),
+pub struct UnknownType {
+    name: String,
+    typ: Type,
 }
 
-impl From<String> for Contained {
-    fn from(name: String) -> Self {
-        Self::Referenced(name)
-    }
-}
-
-impl From<Scope> for Contained {
-    fn from(scope: Scope) -> Self {
-        Self::SubScope(scope)
-    }
+pub struct Stack {
+    variables: HashMap<String, Option<Type>>,
 }
