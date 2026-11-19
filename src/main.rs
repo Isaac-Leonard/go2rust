@@ -24,12 +24,19 @@ fn main() {
     let ast = match gosyn::parse_file(file_path) {
         Ok(ast) => ast,
         Err(err) => {
-            eprintln!("{err}");
+            eprintln!("Failed to parse file, got error: {err}");
             return;
         }
     };
 
-    println!("{:?}", ast);
+    match convert_ast(ast.into(), &mut Context::default()) {
+        Ok(converted) => {
+            eprintln!("{converted}");
+        }
+        Err(err) => {
+            eprintln!("Could not convert file, got error: {err}");
+        }
+    };
 }
 
 pub fn convert_ast(file: File, context: &mut Context) -> Result<String, String> {
