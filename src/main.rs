@@ -661,23 +661,34 @@ pub fn convert_function_literal(func: &FuncLit, context: &mut Context) -> String
 
 pub fn convert_struct_literal(name: &str, values: &LiteralValue, context: &mut Context) -> String {
     let mut fields = vec![];
+    // If we can't determine names for fields then we will call `::new` on the struct instead passing the given fields as arguments
+    let mut unnamed_fields = false;
     for KeyedElement { key, val } in &values.values {
-        let key = key.as_ref().expect(&format!(
-            "cannot handle unnamed fields in struct literals, at ",
-        ));
         // We really should be checking that this is an identifier but we assume we are converting valid code.
-        let key = convert_element(key, context);
+        let key = key.as_ref().map(|key| convert_element(key, context));
         let val = convert_element(val, context);
+        if key.is_none() {
+            unnamed_fields = true;
+        }
         fields.push((key, val))
     }
+    if unnamed_fields {
+        let fields = fields
+            .into_iter()
+            .map(|(_, value)| value)
+            .collect::<Vec<_>>()
+            .join(", ");
 
-    let fields = fields
-        .into_iter()
-        .map(|(key, value)| format!("{key}: {value},"))
-        .collect::<Vec<_>>()
-        .join("\n");
+        format!("{name}::new({fields})")
+    } else {
+        let fields = fields
+            .into_iter()
+            .map(|(key, value)| format!("{}: {},", key.unwrap(), value))
+            .collect::<Vec<_>>()
+            .join("\n");
 
-    format!("{name} {{\n{fields}\n}}")
+        format!("{name} {{\n{fields}\n}}")
+    }
 }
 
 pub fn convert_map_literal(map: &MapType, val: &LiteralValue, context: &mut Context) -> String {
@@ -1503,6 +1514,14 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (){Point{x:4,y:2}}",
             "fn test(){\nPoint {\nx: 4,\ny: 2,\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_struct_literal_with_unnamed_fields() {
+        assert_transformation(
+            "package main;\nfunc test (){Point{4,2}}",
+            "fn test(){\nPoint::new(4, 2)\n}",
         );
     }
 
