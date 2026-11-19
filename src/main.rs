@@ -22,6 +22,8 @@ fn main() {
         eprintln!("No file specified");
         return;
     };
+
+    let dest = args.next();
     let ast = match gosyn::parse_file(file_path) {
         Ok(ast) => ast,
         Err(err) => {
@@ -32,7 +34,14 @@ fn main() {
 
     match convert_ast(ast.into(), &mut Context::default()) {
         Ok(converted) => {
-            eprintln!("{converted}");
+            if let Some(dest) = dest {
+                if let Err(err) = std::fs::write(dest, converted) {
+                    eprintln!("Failed to write file: got err {err}");
+                    return;
+                };
+            } else {
+                println!("{converted}");
+            }
         }
         Err(err) => {
             eprintln!("Could not convert file, got error: {err}");
