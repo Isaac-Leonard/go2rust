@@ -9,7 +9,8 @@ use ast::{
     ArrayType, BasicLit, BlockStmt, BranchStmt, Call, CompositeLit, ConstSpec, Decl, DeclStmt,
     Declaration, Element, Expression, Field, File, ForStmt, FuncDecl, FuncLit, FuncType, IfStmt,
     Import, Index, InstantiatedType, InterfaceType, KeyedElement, LiteralValue, MapType, NameType,
-    RangeStmt, Selector, ShortVarDecl, SliceType, Statement, StructType, Type, TypeSpec, VarSpec,
+    RangeStmt, Selector, ShortVarDecl, SliceType, Statement, StructType, Type, TypeElem, TypeSpec,
+    TypeTerm, VarSpec,
 };
 use gosyn::token::{Keyword, LitKind};
 use name_resolution::Context;
@@ -357,7 +358,7 @@ fn convert_map_type(map_type: &MapType, context: &mut Context) -> WithExtraTypes
     let WithExtraTypes {
         typ: val,
         extras: val_extras,
-    } = convert_unnamed_type(&val, context);
+    } = convert_unnamed_type(val, context);
     extras.extend(val_extras);
     let typ = format!["HashMap<{key}, {val}>"];
     WithExtraTypes { extras, typ }
@@ -447,13 +448,13 @@ fn convert_struct(name: &str, typ: &StructType, context: &mut Context) -> WithEx
 
 pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
     let name = &func.name.name;
-    let type_params = vec![];
+    let mut type_params = vec![];
     let mut extras = vec![];
     for arg in &func.typ.typ_params {
         let WithExtraTypes {
             typ,
             extras: arg_extras,
-        } = unimplemented![]; // convert_unnamed_type(&arg.constraint);
+        } = convert_type_element(&arg.constraint, context);
         extras.extend(arg_extras);
         for name in &arg.name {
             let name = &name.name;
@@ -565,6 +566,20 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
         format!("impl {recv_type} {{\n{func}\n}}")
     } else {
         func
+    }
+}
+
+fn convert_type_element(constraint: &TypeElem, context: &mut Context) -> WithExtraTypes {
+    match constraint.types.as_slice() {
+        [constraint] => match constraint {
+            TypeTerm::Type(typ) => convert_unnamed_type(typ, context),
+            // TODO Maybe implement these as `AsRef<Type>`??
+            _ => unimplemented!["Underlying type constraints are not currently supported"],
+        },
+        _ => unimplemented![
+            "Generic type constraints with more then 1 union type are not supported, got {} types in type element",
+            constraint.types.len()
+        ],
     }
 }
 
@@ -756,7 +771,7 @@ pub fn convert_call(call: &Call, context: &mut Context) -> String {
         _ => {
             let func = convert_expr(&call.func, context);
             if call.dots {
-                unimplemented!("Cannot flatten rest arguments yet");
+                // unimplemented!("Cannot flatten rest arguments yet");
             }
             let args = call
                 .args
@@ -1616,6 +1631,14 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test(){for {continue outter}}",
             "fn test(){\nloop {\ncontinue 'outter;\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_function_with_type_param() {
+        assert_transformation(
+            "package main;\nfunc test[t any](){}",
+            "fn test<t: any>(){\n\n}",
         );
     }
 }
