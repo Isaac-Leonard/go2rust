@@ -7,10 +7,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ast::{
     ArrayType, BasicLit, BlockStmt, BranchStmt, Call, CompositeLit, ConstSpec, Decl, DeclStmt,
-    Declaration, Element, Expression, Field, File, ForStmt, FuncDecl, FuncLit, FuncType, IfStmt,
-    Import, Index, InstantiatedType, InterfaceType, KeyedElement, LiteralValue, MapType, NameType,
-    RangeStmt, Selector, ShortVarDecl, SliceType, Statement, StructType, Type, TypeElem, TypeSpec,
-    TypeTerm, VarSpec,
+    Declaration, Element, ExprSwitchStmt, Expression, Field, File, ForStmt, FuncDecl, FuncLit,
+    FuncType, IfStmt, Import, Index, InstantiatedType, InterfaceType, KeyedElement, LiteralValue,
+    MapType, NameType, RangeStmt, Selector, ShortVarDecl, SliceType, Statement, StructType,
+    SwitchStmt, Type, TypeElem, TypeSpec, TypeTerm, VarSpec,
 };
 use gosyn::token::{Keyword, LitKind};
 use name_resolution::Context;
@@ -892,6 +892,9 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
         Statement::Range(range_stmt) => convert_range_stmt(range_stmt, context),
         Statement::Empty(_) => "{}".to_string(),
         Statement::Branch(branch) => convert_branch_stmt(branch, context),
+        Statement::Switch(SwitchStmt::Expr(expr_switch)) => {
+            convert_expr_switch_stmt(expr_switch, context)
+        }
         other => unimplemented!["Cannot yet convert {other:?}"],
     }
 }
@@ -990,6 +993,80 @@ fn convert_branch_stmt(branch: &BranchStmt, context: &mut Context) -> String {
     };
 
     format!("{control_flow}{label};")
+}
+
+fn convert_expr_switch_stmt(switch: &ExprSwitchStmt, context: &mut Context) -> String {
+    let convert_to_if = switch.tag.is_none()
+        || !switch.block.body.iter().all(|case| {
+            case.list
+                .iter()
+                .all(|expr| matches!(expr, Expression::Ident(_) | Expression::BasicLit(_)))
+        });
+    let init = switch.init.as_ref().map(|init| convert_stmt(init, context));
+    let switch = if convert_to_if {
+        let tag = switch
+            .tag
+            .as_ref()
+            .map(|expr| convert_expr(expr, context))
+            .unwrap_or_else(|| "true".to_string());
+        let mut cases = vec![];
+        for case in &switch.block.body {
+            let mut conditions = case
+                .list
+                .iter()
+                .map(|cond| convert_expr(cond, context))
+                .map(|cond| format!("({cond}) == {tag}"))
+                .collect::<Vec<_>>()
+                .join(" || ");
+            let block = case
+                .body
+                .iter()
+                .map(|stmt| convert_stmt(stmt, context))
+                .collect::<Vec<_>>()
+                .join(";\n");
+            let if_keyword = match case.tok {
+                Keyword::Case => "if ",
+                Keyword::Default => "",
+                other => panic!("Found unexpected keyword used for switch statement: {other:?}",),
+            };
+            cases.push(format!("{if_keyword}{conditions} {{\n{block}\n}}"))
+        }
+        cases.join(" else ")
+    } else {
+        // Unwrap is safe here as we have already checked that tag exists when checking if we should convert to an if statement or not.
+        let tag = switch.tag.as_ref().unwrap();
+        let tag = convert_expr(tag, context);
+        let mut cases = vec![];
+        for case in &switch.block.body {
+            let mut conditions = case
+                .list
+                .iter()
+                .map(|cond| convert_expr(cond, context))
+                .collect::<Vec<_>>()
+                .join(" | ");
+            let block = case
+                .body
+                .iter()
+                .map(|stmt| convert_stmt(stmt, context))
+                .collect::<Vec<_>>()
+                .join(";\n");
+            // We don't know what statement finishes the block and some, like return statements require a trailing semicolon in match branches so we take the simple route and just wrap all branches in braces.
+            let block = format!("{{\n{block}\n}}");
+            let conditions = match case.tok {
+                Keyword::Case => conditions,
+                Keyword::Default => "_".to_string(),
+                other => panic!("Found unexpected keyword used for switch statement: {other:?}",),
+            };
+            cases.push(format!("{conditions} => {block}"))
+        }
+        let cases = cases.join("\n");
+        format!("match {tag} {{\n{cases}\n}}")
+    };
+    if let Some(init) = init {
+        format!("{{\n{init};\n{switch}\n}}")
+    } else {
+        switch
+    }
 }
 
 #[cfg(test)]
@@ -1639,6 +1716,70 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test[t any](){}",
             "fn test<t: any>(){\n\n}",
+        );
+    }
+
+    #[test]
+    fn transform_switch_stmt_with_no_tag_and_complex_cases_and_no_default() {
+        assert_transformation(
+            "package main;\nfunc test(){switch{case x==0:return 0;\ncase x==1: dothing()}}",
+            "fn test(){\nif (x == 0) == true {\nreturn 0;\n} else if (x == 1) == true {\ndothing()\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_switch_stmt_with_no_tag_and_complex_cases_and_default() {
+        assert_transformation(
+            "package main;\nfunc test(){switch{case x==0:return 0;\ncase x==1: dothing();default: dootherthing()}}",
+            "fn test(){\nif (x == 0) == true {\nreturn 0;\n} else if (x == 1) == true {\ndothing()\n} else  {\ndootherthing()\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_switch_stmt_with_tag_and_complex_cases_and_no_default() {
+        assert_transformation(
+            "package main;\nfunc test(){switch false {case x==0:return 0;\ncase x==1: dothing()}}",
+            "fn test(){\nif (x == 0) == false {\nreturn 0;\n} else if (x == 1) == false {\ndothing()\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_switch_stmt_with_tag_and_complex_cases_and_default() {
+        assert_transformation(
+            "package main;\nfunc test(){switch false{case x==0:return 0;\ncase x==1: dothing();default: dootherthing()}}",
+            "fn test(){\nif (x == 0) == false {\nreturn 0;\n} else if (x == 1) == false {\ndothing()\n} else  {\ndootherthing()\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_switch_stmt_with_no_tag_and_complex_multi_cases_and_no_default() {
+        assert_transformation(
+            "package main;\nfunc test(){switch{case x==0, x==2:return 0;\ncase x==1: dothing()}}",
+            "fn test(){\nif (x == 0) == true || (x == 2) == true {\nreturn 0;\n} else if (x == 1) == true {\ndothing()\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_switch_stmt_with_tag_and_simple_cases_and_no_default() {
+        assert_transformation(
+            "package main;\nfunc test(){switch number {case 0:return 0;\ncase one: dothing()}}",
+            "fn test(){\nmatch number {\n0 => {\nreturn 0;\n}\none => {\ndothing()\n}\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_switch_stmt_with_tag_and_simple_cases_and_default() {
+        assert_transformation(
+            "package main;\nfunc test(){switch number {case 0:return 0;\ncase one: dothing();default: dootherthing()}}",
+            "fn test(){\nmatch number {\n0 => {\nreturn 0;\n}\none => {\ndothing()\n}\n_ => {\ndootherthing()\n}\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_switch_stmt_with_tag_and_simple_multi_cases_and_no_default() {
+        assert_transformation(
+            "package main;\nfunc test(){switch number {case 0, 2:return 0;\ncase one, three: dothing()}}",
+            "fn test(){\nmatch number {\n0 | 2 => {\nreturn 0;\n}\none | three => {\ndothing()\n}\n}\n}",
         );
     }
 }
