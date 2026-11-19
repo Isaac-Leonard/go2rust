@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use ast::{
     ArrayType, BasicLit, BlockStmt, Call, CompositeLit, ConstSpec, Decl, DeclStmt, Declaration,
     Element, Expression, Field, File, ForStmt, FuncDecl, FuncLit, FuncType, IfStmt, Import, Index,
-    InstantiatedType, InterfaceType, KeyedElement, LiteralValue, MapType, NameType, Selector,
-    ShortVarDecl, SliceType, Statement, StructType, Type, TypeSpec, VarSpec,
+    InstantiatedType, InterfaceType, KeyedElement, LiteralValue, MapType, NameType, RangeStmt,
+    Selector, ShortVarDecl, SliceType, Statement, StructType, Type, TypeSpec, VarSpec,
 };
 use gosyn::token::LitKind;
 use name_resolution::Context;
@@ -854,6 +854,8 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
         Statement::ShortVarDecl(decl) => convert_short_variable_decl(decl, context),
         Statement::If(if_stmt) => convert_if_stmt(if_stmt, context),
         Statement::For(for_stmt) => convert_for_stmt(for_stmt, context),
+        Statement::Range(range_stmt) => convert_range_stmt(range_stmt, context),
+        Statement::Empty(_) => "{}".to_string(),
         other => unimplemented!["Cannot yet convert {other:?}"],
     }
 }
@@ -913,6 +915,30 @@ fn convert_for_stmt(for_stmt: &ForStmt, context: &mut Context) -> String {
     } else {
         loop_stmt
     }
+}
+
+fn convert_range_stmt(range_stmt: &RangeStmt, context: &mut Context) -> String {
+    let key = range_stmt
+        .key
+        .as_ref()
+        .map(|key| convert_expr(key, context));
+
+    let val = range_stmt
+        .value
+        .as_ref()
+        .map(|val| convert_expr(val, context));
+
+    let decl = match (key, val) {
+        (Some(key), Some(val)) => format!("({key}, {val})"),
+        (Some(var), None) | (None, Some(var)) => var,
+        (None, None) => panic!("Cannot have range loop without a key or value"),
+    };
+
+    let mut expr = convert_expr(&range_stmt.expr, context);
+    let mut body = convert_block_stmt(&range_stmt.body, context);
+
+    // TODO We need to find a way to assign the variables outside of the loop scope if a simple "=" operator is used instead of ":=" for the range expression.
+    format!("for {decl} in {expr} {body}")
 }
 
 #[cfg(test)]
@@ -1482,6 +1508,22 @@ mod tests {
         assert_transformation(
             "package main;\nfunc test (f func()string){}",
             "fn test(f: Fn()->string){\n\n}",
+        );
+    }
+
+    #[test]
+    fn transform_simple_range_statement() {
+        assert_transformation(
+            "package main;\nfunc test (){ for i := range array {} }",
+            "fn test(){\nfor i in array {\n\n}\n}",
+        );
+    }
+
+    #[test]
+    fn transform_range_statement_with_key_and_val() {
+        assert_transformation(
+            "package main;\nfunc test (){ for k, v := range hashmap {} }",
+            "fn test(){\nfor (k, v) in hashmap {\n\n}\n}",
         );
     }
 }
