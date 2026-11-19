@@ -277,7 +277,7 @@ pub fn convert_func_type(func_type: &FuncType, context: &mut Context) -> WithExt
         match param.identifiers.as_slice() {
             [] | [_] => {
                 // We convert variadic parameters into vectors for now
-                if param.variadic.is_some() {
+                if param.variadic {
                     params.push(format!("Vec<{typ}>"));
                 } else {
                     params.push(format!("{typ}"));
@@ -286,7 +286,7 @@ pub fn convert_func_type(func_type: &FuncType, context: &mut Context) -> WithExt
             names => {
                 for (index, _) in names.iter().enumerate() {
                     // We convert variadic parameters into vectors for now
-                    if param.variadic.is_some() && index == names.len() - 1 {
+                    if param.variadic && index == names.len() - 1 {
                         params.push(format!("Vec<{typ}>"));
                     } else {
                         params.push(format!("{typ}"));
@@ -459,7 +459,7 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
         match param.identifiers.as_slice() {
             [] => {
                 // We convert variadic parameters into vectors for now
-                if param.variadic.is_some() {
+                if param.variadic {
                     params.push(format!("_: Vec<{typ}>"));
                 } else {
                     params.push(format!("_: {typ}"));
@@ -468,7 +468,7 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
             [name] => {
                 let name = &name.name;
                 // We convert variadic parameters into vectors for now
-                if param.variadic.is_some() {
+                if param.variadic {
                     params.push(format!("{name}: Vec<{typ}>"));
                 } else {
                     params.push(format!("{name}: {typ}"));
@@ -478,7 +478,7 @@ pub fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
                 for (index, name) in names.iter().enumerate() {
                     let name = &name.name;
                     // We convert variadic parameters into vectors for now
-                    if param.variadic.is_some() && index == names.len() - 1 {
+                    if param.variadic && index == names.len() - 1 {
                         params.push(format!("{name}: Vec<{typ}>"));
                     } else {
                         params.push(format!("{name}: {typ}"));
@@ -561,7 +561,7 @@ pub fn convert_function_literal(func: &FuncLit, context: &mut Context) -> String
         match param.identifiers.as_slice() {
             [] => {
                 // We convert variadic parameters into vectors for now
-                if param.variadic.is_some() {
+                if param.variadic {
                     params.push(format!("_: Vec<{typ}>"));
                 } else {
                     params.push(format!("_: {typ}"));
@@ -570,7 +570,7 @@ pub fn convert_function_literal(func: &FuncLit, context: &mut Context) -> String
             [name] => {
                 let name = &name.name;
                 // We convert variadic parameters into vectors for now
-                if param.variadic.is_some() {
+                if param.variadic {
                     params.push(format!("{name}: Vec<{typ}>"));
                 } else {
                     params.push(format!("{name}: {typ}"));
@@ -580,7 +580,7 @@ pub fn convert_function_literal(func: &FuncLit, context: &mut Context) -> String
                 for (index, name) in names.iter().enumerate() {
                     let name = &name.name;
                     // We convert variadic parameters into vectors for now
-                    if param.variadic.is_some() && index == names.len() - 1 {
+                    if param.variadic && index == names.len() - 1 {
                         params.push(format!("{name}: Vec<{typ}>"));
                     } else {
                         params.push(format!("{name}: {typ}"));

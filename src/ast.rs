@@ -160,7 +160,7 @@ impl From<gosyn::ast::NamedField> for NamedField {
 
 #[derive(Debug, Clone)]
 pub struct EmbeddedField {
-    pub pointer: Option<usize>,
+    pub pointer: bool,
     pub typ: NameType,
     pub type_args: Vec<Type>,
 }
@@ -168,7 +168,7 @@ pub struct EmbeddedField {
 impl From<gosyn::ast::EmbeddedField> for EmbeddedField {
     fn from(value: gosyn::ast::EmbeddedField) -> Self {
         Self {
-            pointer: value.pointer,
+            pointer: value.pointer.is_some(),
             typ: value.typ.into(),
             type_args: value.type_args.into_iter().map(Into::into).collect(),
         }
@@ -206,7 +206,7 @@ impl From<gosyn::ast::StructType> for StructType {
 #[derive(Debug, Clone)]
 pub struct ParameterSpec {
     pub identifiers: Vec<Ident>,
-    pub variadic: Option<usize>, // If Some then represents the position of the ... operator
+    pub variadic: bool, // If Some then represents the position of the ... operator
     pub typ: Type,
 }
 
@@ -214,7 +214,7 @@ impl From<gosyn::ast::ParameterSpec> for ParameterSpec {
     fn from(value: gosyn::ast::ParameterSpec) -> Self {
         Self {
             identifiers: value.identifiers.into_iter().map(Into::into).collect(),
-            variadic: value.variadic,
+            variadic: value.variadic.is_some(),
             typ: value.typ.into(),
         }
     }
@@ -1201,7 +1201,7 @@ impl From<gosyn::ast::SelectStmt> for SelectStmt {
 pub struct RangeStmt {
     pub key: Option<Expression>,
     pub value: Option<Expression>,
-    pub op: Option<(usize, Operator)>, // define or assign
+    pub op: Option<Operator>, // define or assign
     pub expr: Expression,
     pub body: BlockStmt,
 }
@@ -1211,7 +1211,7 @@ impl From<gosyn::ast::RangeStmt> for RangeStmt {
         Self {
             key: value.key.map(Into::into),
             value: value.value.map(Into::into),
-            op: value.op.into(),
+            op: value.op.map(|(_, op)| op),
             expr: value.expr.into(),
             body: value.body.into(),
         }
