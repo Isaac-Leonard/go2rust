@@ -804,7 +804,7 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
         Expression::Range(range_expr) => todo!(),
         Expression::TypeAssert(type_assertion) => todo!(),
         Expression::List(expressions) => todo!(),
-        Expression::Type(_) => todo!(),
+        Expression::Type(typ) => convert_unnamed_type(typ, context).typ,
     }
 }
 
@@ -854,7 +854,7 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
         Statement::ShortVarDecl(decl) => convert_short_variable_decl(decl, context),
         Statement::If(if_stmt) => convert_if_stmt(if_stmt, context),
         Statement::For(for_stmt) => convert_for_stmt(for_stmt, context),
-        _ => unimplemented![],
+        other => unimplemented!["Cannot yet convert {other:?}"],
     }
 }
 
