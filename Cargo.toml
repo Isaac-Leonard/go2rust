@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 chumsky = "0.13.0"
+clap = { version = "4.6.9", features = ["derive"] }
 gosyn = {"git"="https://github.com/Isaac-leonard/gosyn", rev = "c14e801d0180c6fdf67700003928a49348146c1b"}

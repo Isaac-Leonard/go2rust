@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod cli;
 pub mod name_resolution;
 pub mod type_inferance;
 pub mod utils;
@@ -12,19 +13,15 @@ use ast::{
     MapType, NameType, RangeStmt, Selector, ShortVarDecl, SliceType, Statement, StructType,
     SwitchStmt, Type, TypeElem, TypeSpec, TypeTerm, VarSpec,
 };
+use clap::Parser;
+use cli::Cli;
 use gosyn::token::{Keyword, LitKind};
 use name_resolution::Context;
 use type_inferance::infer_type;
 
 fn main() {
-    let mut args = std::env::args();
-    let Some(file_path) = args.nth(1) else {
-        eprintln!("No file specified");
-        return;
-    };
-
-    let dest = args.next();
-    let ast = match gosyn::parse_file(file_path) {
+    let cli = Cli::parse();
+    let ast = match gosyn::parse_file(cli.input) {
         Ok(ast) => ast,
         Err(err) => {
             eprintln!("Failed to parse file, got error: {err}");
@@ -34,8 +31,8 @@ fn main() {
 
     match convert_ast(ast.into(), &mut Context::default()) {
         Ok(converted) => {
-            if let Some(dest) = dest {
-                if let Err(err) = std::fs::write(dest, converted) {
+            if let Some(output) = cli.output {
+                if let Err(err) = std::fs::write(output, converted) {
                     eprintln!("Failed to write file: got err {err}");
                     return;
                 };
