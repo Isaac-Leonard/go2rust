@@ -954,4 +954,27 @@ mod tests {
             "fn test(){\nmatch number {\n0 | 2 => {\nreturn 0;\n}\none | three => {\ndothing()\n}\n}\n}",
         );
     }
+
+    #[test]
+    fn transform_slice_with_no_indices() {
+        assert_transformation("package main;\nfunc test(){x[:]}", "fn test(){\nx[..]\n}");
+    }
+
+    #[test]
+    fn transform_slice_with_both_indices() {
+        assert_transformation(
+            "package main;\nfunc test(){x[1:4]}",
+            "fn test(){\nx[1..4]\n}",
+        );
+    }
+
+    #[test]
+    fn transform_slice_with_first_index() {
+        assert_transformation("package main;\nfunc test(){x[1:]}", "fn test(){\nx[1..]\n}");
+    }
+
+    #[test]
+    fn transform_slice_with_second_index() {
+        assert_transformation("package main;\nfunc test(){x[:4]}", "fn test(){\nx[..4]\n}");
+    }
 }

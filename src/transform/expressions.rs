@@ -3,7 +3,7 @@ use gosyn::token::LitKind;
 use crate::{
     ast::{
         ArrayType, BasicLit, Call, CompositeLit, Element, Expression, FuncLit, Index, KeyedElement,
-        LiteralValue, MapType, Selector, SliceType, Type,
+        LiteralValue, MapType, Selector, Slice, SliceType, Type,
     },
     name_resolution::Context,
     transform::{
@@ -299,11 +299,31 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
             format!("*{expr}")
         }
         Expression::IndexList(index_list) => todo!(),
-        Expression::Slice(slice) => todo!(),
+        Expression::Slice(slice) => convert_slice(slice, context),
         Expression::Ellipsis(ellipsis) => todo!(),
         Expression::Range(range_expr) => todo!(),
         Expression::TypeAssert(type_assertion) => todo!(),
         Expression::List(expressions) => todo!(),
         Expression::Type(typ) => convert_unnamed_type(typ, context).typ,
     }
+}
+
+fn convert_slice(slice: &Slice, context: &mut Context) -> String {
+    let left = convert_expr(&slice.left, context);
+    let index = slice
+        .index
+        .each_ref()
+        .map(|index| index.as_deref().map(|exp| convert_expr(exp, context)));
+
+    let index = match index {
+        [None, None, None] => "..".to_string(),
+        [Some(start), None, None] => format!("{start}.."),
+        [None, Some(end), None] => format!("..{end}"),
+        [Some(start), Some(end), None] => format!("{start}..{end}"),
+        _ => {
+            panic!("full slice expressions have no equivilent in rust.")
+        }
+    };
+
+    format!("{left}[{index}]")
 }
