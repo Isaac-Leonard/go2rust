@@ -39,6 +39,8 @@ fn main() {
     let hooks = pre::Hooks {
         types: vec![&upper_case_string_types],
         func_types: vec![&return_slice_to_vec],
+        statements: vec![],
+        expressions: vec![],
     };
 
     pre::apply(&mut ast, &mut context, &hooks);

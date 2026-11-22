@@ -10,6 +10,8 @@ use crate::{
 pub struct Hooks {
     pub types: Vec<&'static dyn Fn(&mut Type, &mut Context)>,
     pub func_types: Vec<&'static dyn Fn(&mut FuncType, &mut Context)>,
+    pub statements: Vec<&'static dyn Fn(&mut Statement, &mut Context)>,
+    pub expressions: Vec<&'static dyn Fn(&mut Expression, &mut Context)>,
 }
 
 pub fn apply(ast: &mut File, context: &mut Context, hooks: &Hooks) {
@@ -210,6 +212,9 @@ fn apply_for_statement(stmt: &mut Statement, context: &mut Context, hooks: &Hook
             // No types inside these statement types so we do nothing.
         }
     }
+    for hook in &hooks.statements {
+        hook(stmt, context);
+    }
 }
 
 fn apply_for_variable_decl(var_decl: &mut Decl<VarSpec>, context: &mut Context, hooks: &Hooks) {
@@ -306,6 +311,9 @@ fn apply_for_expression(expr: &mut Expression, context: &mut Context, hooks: &Ho
         Expression::BasicLit(_) | Expression::Ident(_) => {
             // These expressions do not have types inside them so we do nothing.
         }
+    }
+    for hook in &hooks.expressions {
+        hook(expr, context);
     }
 }
 
