@@ -1,5 +1,5 @@
 use crate::{
-    ast::{FuncType, Ident, InstantiatedType, NameType, PointerType, Type},
+    ast::{FuncType, Ident, InstantiatedType, NameType, Type},
     name_resolution::Context,
 };
 

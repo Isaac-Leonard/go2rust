@@ -1,8 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::ast::{
-    BlockStmt, Call, Declaration, Expression, File, FuncType, Ident, NameType, Statement, Type,
-    TypeElem, TypeParamDecl, TypeTerm,
+    BlockStmt, Call, Declaration, Expression, File, Ident, NameType, Statement, Type,
 };
 
 #[derive(Default)]
