@@ -10,7 +10,6 @@ use crate::{
         statements::convert_block_stmt,
         types::{WithExtraTypes, convert_unnamed_type},
     },
-    type_inferance::infer_type,
 };
 
 fn convert_function_literal(func: &FuncLit, context: &mut Context) -> String {
@@ -228,7 +227,7 @@ pub fn convert_call(call: &Call, context: &mut Context) -> String {
     // TODO Handle passing variadic arguments.
     // TODO Handle passing rest arguments.
     // TODO handle builtins
-    match &*call.func {
+    match call.func.as_ref() {
         //Expression::Ident(ident) if context.is_builtin(ident) => match ident.name {
         //     "clear" => convert_clear_call(call.args, context),
         // },
@@ -245,30 +244,6 @@ pub fn convert_call(call: &Call, context: &mut Context) -> String {
                 .join(", ");
             format!("{func}({args})")
         }
-    }
-}
-
-// TODO maybe convert this to be a hook
-fn convert_clear_call(args: &[Expression], context: &mut Context) -> String {
-    match args {
-        [arg] => {
-            let typ = infer_type(arg, context);
-            let arg = convert_expr(arg, context);
-            match typ {
-                Type::Map(_) => format!("({arg}).clear()"),
-                Type::Slice(_) => todo![],
-                Type::Name(name_type) => todo!(),
-                Type::Instantiated(instantiated_type) => todo!(),
-                Type::Array(array_type) => todo!(),
-                Type::Function(func_type) => todo!(),
-                Type::Struct(struct_type) => todo!(),
-                Type::Channel(channel_type) => todo!(),
-                Type::Pointer(pointer_type) => todo!(),
-                Type::Interface(interface_type) => todo!(),
-                Type::Paren(paren_type) => todo!(),
-            }
-        }
-        _ => unreachable![],
     }
 }
 
@@ -300,10 +275,24 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
         }
         Expression::IndexList(index_list) => todo!(),
         Expression::Slice(slice) => convert_slice(slice, context),
-        Expression::Ellipsis(ellipsis) => todo!(),
-        Expression::Range(range_expr) => todo!(),
-        Expression::TypeAssert(type_assertion) => todo!(),
-        Expression::List(expressions) => todo!(),
+        // Just pass the variable for now as if it wasn't attemting to be flattened.
+        // This generally works because it is generally used to pass to variadic functions where we also remove the rest parameter from so we end up just passing a vec to a vec in most cases hopefully.
+        Expression::Ellipsis(ellipsis) => {
+            if let Some(elt) = ellipsis.elt.as_deref() {
+                convert_expr(elt, context)
+            } else {
+                "_".to_string()
+            }
+        }
+        // I don't believe these can appear anywhere but in for loops which are handled separately leaving this variant as unused.
+        Expression::Range(_range_expr) => {
+            unreachable!["Invalid assumption made about range expressions."]
+        }
+        Expression::TypeAssert(_type_assertion) => {
+            panic!("Attempted to convert type assertion but rust has no real equivalent.")
+        }
+        // This variant will be removed in future
+        Expression::List(_expressions) => todo!(),
         Expression::Type(typ) => convert_unnamed_type(typ, context).typ,
     }
 }
