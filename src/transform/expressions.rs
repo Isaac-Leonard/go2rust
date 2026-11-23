@@ -227,24 +227,17 @@ pub fn convert_call(call: &Call, context: &mut Context) -> String {
     // TODO Handle passing variadic arguments.
     // TODO Handle passing rest arguments.
     // TODO handle builtins
-    match call.func.as_ref() {
-        //Expression::Ident(ident) if context.is_builtin(ident) => match ident.name {
-        //     "clear" => convert_clear_call(call.args, context),
-        // },
-        _ => {
-            let func = convert_expr(&call.func, context);
-            if call.dots {
-                // unimplemented!("Cannot flatten rest arguments yet");
-            }
-            let args = call
-                .args
-                .iter()
-                .map(|expr| convert_expr(expr, context))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{func}({args})")
-        }
+    let func = convert_expr(&call.func, context);
+    if call.dots {
+        // unimplemented!("Cannot flatten rest arguments yet");
     }
+    let args = call
+        .args
+        .iter()
+        .map(|expr| convert_expr(expr, context))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{func}({args})")
 }
 
 pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
@@ -285,11 +278,13 @@ pub fn convert_expr(expr: &Expression, context: &mut Context) -> String {
             }
         }
         // I don't believe these can appear anywhere but in for loops which are handled separately leaving this variant as unused.
-        Expression::Range(_range_expr) => {
-            unreachable!["Invalid assumption made about range expressions."]
+        Expression::Range(range_expr) => {
+            unreachable!["Invalid assumption made about range expressions, got: {range_expr:?}."]
         }
-        Expression::TypeAssert(_type_assertion) => {
-            panic!("Attempted to convert type assertion but rust has no real equivalent.")
+        Expression::TypeAssert(type_assertion) => {
+            panic!(
+                "Attempted to convert type assertion but rust has no real equivalent, got: {type_assertion:?}"
+            )
         }
         // This variant will be removed in future
         Expression::List(_expressions) => todo!(),
@@ -309,8 +304,8 @@ fn convert_slice(slice: &Slice, context: &mut Context) -> String {
         [Some(start), None, None] => format!("{start}.."),
         [None, Some(end), None] => format!("..{end}"),
         [Some(start), Some(end), None] => format!("{start}..{end}"),
-        _ => {
-            panic!("full slice expressions have no equivilent in rust.")
+        other => {
+            panic!("full slice expressions have no equivilent in rust, got: {other:?}")
         }
     };
 

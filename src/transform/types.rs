@@ -284,11 +284,12 @@ pub fn convert_type_element(constraint: &TypeElem, context: &mut Context) -> Wit
         [constraint] => match constraint {
             TypeTerm::Type(typ) => convert_unnamed_type(typ, context),
             // TODO Maybe implement these as `AsRef<Type>`??
-            _ => unimplemented!["Underlying type constraints are not currently supported"],
+            other => unimplemented![
+                "Underlying type constraints are not currently supported, got: {other:?}"
+            ],
         },
-        _ => unimplemented![
-            "Generic type constraints with more then 1 union type are not supported, got {} types in type element",
-            constraint.types.len()
+        other => unimplemented![
+            "Generic type constraints with more then 1 union type are not supported, got: {other:?}",
         ],
     }
 }

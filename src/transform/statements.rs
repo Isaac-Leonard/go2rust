@@ -116,7 +116,7 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
         Statement::Switch(SwitchStmt::Expr(expr_switch)) => {
             convert_expr_switch_stmt(expr_switch, context)
         }
-        other => unimplemented!["Cannot yet convert {other:?}"],
+        other => unimplemented!["Cannot yet convert statement {other:?}"],
     }
 }
 
