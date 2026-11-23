@@ -147,7 +147,7 @@ pub fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes
         Type::Array(ArrayType { len, typ, .. }) => {
             let len = convert_expr(len, context);
             let WithExtraTypes { typ, extras } = convert_unnamed_type(typ, context);
-            let typ = format!["{typ}[{len}]"];
+            let typ = format!["[{typ}; {len}]"];
             WithExtraTypes { extras, typ }
         }
         Type::Map(map_type) => convert_map_type(map_type, context),

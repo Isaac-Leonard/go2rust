@@ -445,7 +445,7 @@ mod tests {
     fn transform_func_decl_with_array_param() {
         assert_transformation(
             "package main;\nfunc test (arg [5]first){\n\n}",
-            "fn test(arg: first[5]){\n\n}",
+            "fn test(arg: [first; 5]){\n\n}",
         );
     }
 
@@ -1031,5 +1031,10 @@ mod tests {
             "package main;\ntype myChan=chan thing",
             "type myChan = chan<thing>;",
         );
+    }
+
+    #[test]
+    fn transform_type_decl_for_array() {
+        assert_transformation("package main;\ntype arr=[3]int", "type arr = [int; 3];");
     }
 }
