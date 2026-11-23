@@ -8,7 +8,7 @@ use crate::{
     name_resolution::Context,
     transform::{
         statements::convert_block_stmt,
-        types::{WithExtraTypes, convert_unnamed_type},
+        types::{WithExtraTypeDecls, convert_unnamed_type},
     },
 };
 
@@ -16,7 +16,7 @@ fn convert_function_literal(func: &FuncLit, context: &mut Context) -> String {
     let mut extras = vec![];
     let mut params = vec![];
     for param in &func.typ.params {
-        let WithExtraTypes {
+        let WithExtraTypeDecls {
             typ,
             extras: param_extras,
         } = convert_unnamed_type(&param.typ, context);
@@ -59,7 +59,7 @@ fn convert_function_literal(func: &FuncLit, context: &mut Context) -> String {
     let mut result = vec![];
 
     for res in &func.typ.result {
-        let WithExtraTypes {
+        let WithExtraTypeDecls {
             typ,
             extras: res_extras,
         } = convert_unnamed_type(&res.typ, context);

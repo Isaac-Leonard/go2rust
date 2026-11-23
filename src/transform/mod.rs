@@ -4,7 +4,7 @@ pub mod types;
 
 use expressions::convert_expr;
 use statements::convert_block_stmt;
-use types::{WithExtraTypes, convert_named_type, convert_type_element, convert_unnamed_type};
+use types::{WithExtraTypeDecls, convert_named_type, convert_type_element, convert_unnamed_type};
 
 use crate::{
     ast::{
@@ -44,14 +44,14 @@ fn convert_decl(decl: &Declaration, context: &mut Context) -> Result<String, Str
 }
 
 fn convert_type_decl(type_d: &Decl<TypeSpec>, context: &mut Context) -> String {
-    let mut types = String::new();
+    let mut type_decls = vec![];
     for spec in &type_d.specs {
         context
             .types
             .insert(spec.name.name.clone(), spec.typ.clone());
-        types += &convert_named_type(&spec.name.name, &spec.typ, context).typ;
+        type_decls.extend(convert_named_type(&spec.name.name, &spec.typ, context));
     }
-    types
+    type_decls.join("\n")
 }
 
 pub fn convert_const_decl(const_decl: &Decl<ConstSpec>, context: &mut Context) -> String {
@@ -59,7 +59,7 @@ pub fn convert_const_decl(const_decl: &Decl<ConstSpec>, context: &mut Context) -
     let mut declarations = vec![];
     for spec in &const_decl.specs {
         let typ = if let Some(typ) = &spec.typ {
-            let WithExtraTypes {
+            let WithExtraTypeDecls {
                 typ,
                 extras: const_extras,
             } = convert_unnamed_type(&typ, context);
@@ -93,7 +93,7 @@ pub fn convert_variable_decl(var_decl: &Decl<VarSpec>, context: &mut Context) ->
     let mut declarations = vec![];
     for spec in &var_decl.specs {
         let typ = if let Some(typ) = &spec.typ {
-            let WithExtraTypes {
+            let WithExtraTypeDecls {
                 typ,
                 extras: var_extras,
             } = convert_unnamed_type(&typ, context);
@@ -149,7 +149,7 @@ pub fn convert_function_signature(
     let mut type_params = vec![];
     let mut extras = vec![];
     for arg in &func.typ_params {
-        let WithExtraTypes {
+        let WithExtraTypeDecls {
             typ,
             extras: arg_extras,
         } = convert_type_element(&arg.constraint, context);
@@ -169,7 +169,7 @@ pub fn convert_function_signature(
 
     let mut params = vec![];
     for param in &func.params {
-        let WithExtraTypes {
+        let WithExtraTypeDecls {
             typ,
             extras: param_extras,
         } = convert_unnamed_type(&param.typ, context);
@@ -218,7 +218,7 @@ pub fn convert_function_signature(
     let mut result = vec![];
 
     for res in &func.result {
-        let WithExtraTypes {
+        let WithExtraTypeDecls {
             typ,
             extras: res_extras,
         } = convert_unnamed_type(&res.typ, context);
@@ -1043,6 +1043,30 @@ mod tests {
         assert_transformation(
             "package main;\ntype test=func(string)int",
             "type test = Box<dyn Fn(string)->int>;",
+        );
+    }
+
+    #[test]
+    fn transform_multiple_type_decls() {
+        assert_transformation(
+            "package main;\ntype test=int\ntype other=string",
+            "type test = int;\ntype other = string;",
+        );
+    }
+
+    #[test]
+    fn transform_type_decl_with_anonymus_struct() {
+        assert_transformation(
+            "package main;\ntype test struct{first struct{}}",
+            "struct AnonymousStruct1{\n\n}\nstruct test{\nfirst: AnonymousStruct1,\n}",
+        );
+    }
+
+    #[test]
+    fn transform_map_type_decl() {
+        assert_transformation(
+            "package main;\ntype test map[key]val",
+            "type test = HashMap<key, val>;",
         );
     }
 

@@ -1,74 +1,79 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::ast::{
-    ArrayType, Field, FuncType, InstantiatedType, InterfaceElem, InterfaceType, MapType,
-    MethodElem, NameType, SliceType, StructType, Type, TypeElem, TypeTerm,
+    ArrayType, Field, FuncType, InstantiatedType, InterfaceElem, InterfaceType, MapType, NameType,
+    SliceType, StructType, Type, TypeElem, TypeTerm,
 };
 
 use crate::transform::convert_function_signature;
 use crate::{name_resolution::Context, transform::expressions::convert_expr};
 
-pub struct WithExtraTypes {
+/// This is used to hold type declarations that cannot be inserted in place but that need to be inserted somewhere.
+/// This is needed because Go allows for nameless structs and interfaces but rust does not so we must give them names and declare them separately then reference their names in place.
+pub struct WithExtraTypeDecls {
+    /// Represents the current code to be inserted in place
     pub typ: String,
+    /// Represents code to be inserted not in the current position
     pub extras: Vec<String>,
 }
 
-pub fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> WithExtraTypes {
+impl WithExtraTypeDecls {
+    /// This appends all of the current extras into the passed `Vec` and returns the inline name.
+    /// This is typically used in contexts where multiple `WithExtraTypedecls` are being returned from functions and all of the extras must be collected into a single `Vec` to be returned later on.
+    fn add_to(self, extras: &mut Vec<String>) -> String {
+        extras.extend(self.extras);
+        self.typ
+    }
+}
+
+/// Returns the rust representation of a type declaration for the specified type with the given name along with any anonymus types that were made while making the passed type.
+/// The anonymus type declarations appear first in the returned `Vec` with the one with the passed name being last.
+pub fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> Vec<String> {
     match typ {
-        Type::Name(t_name) => WithExtraTypes {
-            typ: format!("type {} = {};", name, convert_name(t_name)),
-            extras: vec![],
-        },
+        Type::Name(t_name) => {
+            let typ = convert_name(t_name);
+            vec![format!("type {name} = {typ};")]
+        }
         Type::Instantiated(InstantiatedType {
             name: t_name,
             arguments,
-            ..
         }) => {
             let mut extras = vec![];
             let typ = convert_name(t_name);
             let arguments = arguments
-                .iter()
-                .map(|typ| convert_unnamed_type(typ, context))
-                .map(|arg| {
-                    extras.extend(arg.extras);
-                    arg.typ
-                })
-                .reduce(|a, b| format!("{a}, {b}"));
-            let typ = match arguments {
-                Some(arguments) => format!("{typ}<{arguments}>"),
-                None => format!("{typ}"),
+                .into_iter()
+                .map(|typ| convert_unnamed_type(typ, context).add_to(&mut extras))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let typ = if arguments.len() > 0 {
+                format!("{typ}<{arguments}>")
+            } else {
+                format!("{typ}")
             };
             let typ = format!("type {name} = {typ};");
-            WithExtraTypes { typ, extras }
+            extras.push(typ);
+            extras
         }
         Type::Struct(struct_t) => convert_struct(name, struct_t, context),
-        Type::Map(map_type) => {
-            let WithExtraTypes { typ, extras } = convert_map_type(map_type, context);
-            let typ = format!("type {name} = {typ};");
-            WithExtraTypes { extras, typ }
-        }
         Type::Pointer(ptr) => {
             // We handle this separately so we can add in lifetime anotations.
-            let WithExtraTypes { typ, extras } = convert_unnamed_type(&ptr.typ, context);
-            WithExtraTypes {
-                extras,
-                typ: format!("type {name}<'a> = &'a {typ};"),
-            }
+            let WithExtraTypeDecls { typ, mut extras } = convert_unnamed_type(&ptr.typ, context);
+            extras.push(format!("type {name}<'a> = &'a {typ};"));
+            extras
         }
         Type::Slice(slice) => {
             // We handle this separately so we can add in lifetime anotations, same as above.
-            let WithExtraTypes { typ, extras } = convert_unnamed_type(&slice.typ, context);
-            WithExtraTypes {
-                extras,
-                typ: format!("type {name}<'a> = &'a [{typ}];"),
-            }
+            let WithExtraTypeDecls { typ, mut extras } = convert_unnamed_type(&slice.typ, context);
+            extras.push(format!("type {name}<'a> = &'a [{typ}];"));
+            extras
         }
         Type::Interface(interface_type) => convert_interface(name, interface_type, context),
-
         other => {
-            let WithExtraTypes { typ, extras } = convert_unnamed_type(other, context);
-            let typ = format!("type {name} = {typ};");
-            WithExtraTypes { typ, extras }
+            // There is nothing special about the remaining types so we can use normal rust type declaration syntax for them and not provide lifetime anotations.
+            // TODO Investigate making these not just type aliases.
+            let WithExtraTypeDecls { typ, mut extras } = convert_unnamed_type(other, context);
+            extras.push(format!("type {name} = {typ};"));
+            extras
         }
     }
 }
@@ -77,7 +82,7 @@ fn convert_interface(
     name: &str,
     interface_type: &InterfaceType,
     context: &mut Context,
-) -> WithExtraTypes {
+) -> Vec<String> {
     let type_elements = interface_type
         .elements
         .iter()
@@ -86,7 +91,7 @@ fn convert_interface(
             _ => None,
         })
         .collect::<Vec<_>>();
-    let extras = vec![];
+    let mut extras = vec![];
     let requirements = match type_elements.as_slice() {
         [] => "".to_string(),
         other => panic!(
@@ -106,84 +111,78 @@ fn convert_interface(
         .collect::<Vec<_>>()
         .join("\n");
     let typ = format!("trait {name}{requirements} {{\n{methods}\n}}");
-    WithExtraTypes { typ, extras }
+    extras.push(typ);
+    extras
 }
 
-pub fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes {
+pub fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypeDecls {
     match typ {
-        Type::Name(name) => WithExtraTypes {
+        Type::Name(name) => WithExtraTypeDecls {
             typ: convert_name(name),
             extras: vec![],
         },
-        Type::Instantiated(InstantiatedType {
-            name, arguments, ..
-        }) => {
+        Type::Instantiated(InstantiatedType { name, arguments }) => {
             let mut extras = vec![];
             let typ = convert_name(name);
             let arguments = arguments
                 .iter()
-                .map(|typ| convert_unnamed_type(typ, context))
-                .map(|arg| {
-                    extras.extend(arg.extras);
-                    arg.typ
-                })
-                .reduce(|a, b| format!("{a}, {b}"));
-            let typ = match arguments {
-                Some(arguments) => format!("{typ}<{arguments}>"),
-                None => typ,
-            };
-            WithExtraTypes { typ, extras }
+                .map(|typ| convert_unnamed_type(typ, context).add_to(&mut extras))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let typ = format!("{typ}<{arguments}>");
+            WithExtraTypeDecls { typ, extras }
         }
         Type::Struct(struct_t) => {
             let name = generate_type_name(AnonymousType::Struct(struct_t));
-            convert_struct(&name, struct_t, context)
+            let extras = convert_struct(&name, struct_t, context);
+            WithExtraTypeDecls { extras, typ: name }
         }
-        Type::Slice(SliceType { typ, .. }) => {
-            let WithExtraTypes { typ, extras } = convert_unnamed_type(typ, context);
+        Type::Slice(SliceType { typ }) => {
+            let WithExtraTypeDecls { typ, extras } = convert_unnamed_type(typ, context);
             let typ = format!("&[{typ}]");
-            WithExtraTypes { extras, typ }
+            WithExtraTypeDecls { extras, typ }
         }
         Type::Array(ArrayType { len, typ, .. }) => {
             let len = convert_expr(len, context);
-            let WithExtraTypes { typ, extras } = convert_unnamed_type(typ, context);
+            let WithExtraTypeDecls { typ, extras } = convert_unnamed_type(typ, context);
             let typ = format!["[{typ}; {len}]"];
-            WithExtraTypes { extras, typ }
+            WithExtraTypeDecls { extras, typ }
         }
         Type::Map(map_type) => convert_map_type(map_type, context),
         Type::Pointer(pointer_type) => {
-            let WithExtraTypes { typ, extras } = convert_unnamed_type(&pointer_type.typ, context);
+            let WithExtraTypeDecls { typ, extras } =
+                convert_unnamed_type(&pointer_type.typ, context);
             let typ = format!("&mut {typ}");
-            WithExtraTypes { typ, extras }
+            WithExtraTypeDecls { typ, extras }
         }
         Type::Paren(paren_type) => {
-            let WithExtraTypes { typ, extras } = convert_unnamed_type(&paren_type.typ, context);
+            let WithExtraTypeDecls { typ, extras } = convert_unnamed_type(&paren_type.typ, context);
             let typ = format!("({typ})");
-            WithExtraTypes { typ, extras }
+            WithExtraTypeDecls { typ, extras }
         }
         Type::Function(func_type) => convert_func_type(func_type, context),
         Type::Channel(channel_type) => {
-            let WithExtraTypes { typ, extras } = convert_unnamed_type(&channel_type.typ, context);
+            let WithExtraTypeDecls { typ, extras } =
+                convert_unnamed_type(&channel_type.typ, context);
             // Not strictly proper but good enough I think.
             let typ = format!("chan<{typ}>");
-            WithExtraTypes { typ, extras }
+            WithExtraTypeDecls { typ, extras }
         }
         Type::Interface(interface_type) => {
             let name = generate_type_name(AnonymousType::Interface(interface_type));
-            let WithExtraTypes { typ, mut extras } =
-                convert_interface(&name, interface_type, context);
-            extras.push(typ);
+            let extras = convert_interface(&name, interface_type, context);
             let typ = format!("impl {name}");
-            WithExtraTypes { typ, extras }
+            WithExtraTypeDecls { typ, extras }
         }
     }
 }
 
-pub fn convert_func_type(func_type: &FuncType, context: &mut Context) -> WithExtraTypes {
+pub fn convert_func_type(func_type: &FuncType, context: &mut Context) -> WithExtraTypeDecls {
     let mut extras = vec![];
 
     let mut params = vec![];
     for param in &func_type.params {
-        let WithExtraTypes {
+        let WithExtraTypeDecls {
             typ,
             extras: param_extras,
         } = convert_unnamed_type(&param.typ, context);
@@ -216,7 +215,7 @@ pub fn convert_func_type(func_type: &FuncType, context: &mut Context) -> WithExt
     let mut result = vec![];
 
     for res in &func_type.result {
-        let WithExtraTypes {
+        let WithExtraTypeDecls {
             typ,
             extras: res_extras,
         } = convert_unnamed_type(&res.typ, context);
@@ -241,22 +240,22 @@ pub fn convert_func_type(func_type: &FuncType, context: &mut Context) -> WithExt
     };
 
     let typ = format!("Box<dyn Fn({params}){result}>");
-    WithExtraTypes { typ, extras }
+    WithExtraTypeDecls { typ, extras }
 }
 
-fn convert_map_type(map_type: &MapType, context: &mut Context) -> WithExtraTypes {
+fn convert_map_type(map_type: &MapType, context: &mut Context) -> WithExtraTypeDecls {
     let MapType { key, val, .. } = map_type;
-    let WithExtraTypes {
+    let WithExtraTypeDecls {
         typ: key,
         mut extras,
     } = convert_unnamed_type(&key, context);
-    let WithExtraTypes {
+    let WithExtraTypeDecls {
         typ: val,
         extras: val_extras,
     } = convert_unnamed_type(val, context);
     extras.extend(val_extras);
     let typ = format!["HashMap<{key}, {val}>"];
-    WithExtraTypes { extras, typ }
+    WithExtraTypeDecls { extras, typ }
 }
 
 fn convert_name(name: &NameType) -> String {
@@ -290,18 +289,14 @@ fn next_anon_count() -> usize {
     ANON_TYPE_COUNTER.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-fn convert_struct(name: &str, typ: &StructType, context: &mut Context) -> WithExtraTypes {
-    let mut extras = vec![];
-    let header = format!("struct {name}{{");
+fn convert_struct(name: &str, typ: &StructType, context: &mut Context) -> Vec<String> {
+    let mut decls = vec![];
+    let header = format!("struct {name}");
     let mut fields = vec![];
     for field in &typ.fields {
         match &field.field {
             Field::Named(field) => {
-                let WithExtraTypes {
-                    typ,
-                    extras: field_extras,
-                } = convert_unnamed_type(&field.typ, context);
-                extras.extend(field_extras);
+                let typ = convert_unnamed_type(&field.typ, context).add_to(&mut decls);
                 for name in &field.name {
                     let name = match name.name.as_str() {
                         // _ is not a valid field name in rust so we must replace it.
@@ -314,15 +309,10 @@ fn convert_struct(name: &str, typ: &StructType, context: &mut Context) -> WithEx
                 }
             }
             Field::Embedded(field) => {
-                let mut extras = vec![];
                 let mut arguments = vec![];
 
                 for arg in &field.type_args {
-                    let WithExtraTypes {
-                        typ,
-                        extras: arg_extras,
-                    } = convert_unnamed_type(arg, context);
-                    extras.extend(arg_extras);
+                    let typ = convert_unnamed_type(arg, context).add_to(&mut decls);
                     arguments.push(typ);
                 }
                 let arguments = if !arguments.is_empty() {
@@ -343,12 +333,12 @@ fn convert_struct(name: &str, typ: &StructType, context: &mut Context) -> WithEx
         };
     }
     let fields = fields.join("\n");
-    let tail = "}";
-    let typ = format!("{header}\n{fields}\n{tail}");
-    WithExtraTypes { typ, extras }
+    let typ = format!("{header}{{\n{fields}\n}}");
+    decls.push(typ);
+    decls
 }
 
-pub fn convert_type_element(constraint: &TypeElem, context: &mut Context) -> WithExtraTypes {
+pub fn convert_type_element(constraint: &TypeElem, context: &mut Context) -> WithExtraTypeDecls {
     match constraint.types.as_slice() {
         [constraint] => match constraint {
             TypeTerm::Type(typ) => convert_unnamed_type(typ, context),
