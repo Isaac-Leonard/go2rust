@@ -796,7 +796,7 @@ mod tests {
     fn transform_func_type_empty() {
         assert_transformation(
             "package main;\nfunc test (f func()){}",
-            "fn test(f: Fn()){\n\n}",
+            "fn test(f: Box<dyn Fn()>){\n\n}",
         );
     }
 
@@ -804,7 +804,7 @@ mod tests {
     fn transform_func_type_with_unnamed_params() {
         assert_transformation(
             "package main;\nfunc test (f func(i64,string)){}",
-            "fn test(f: Fn(i64, string)){\n\n}",
+            "fn test(f: Box<dyn Fn(i64, string)>){\n\n}",
         );
     }
 
@@ -812,7 +812,7 @@ mod tests {
     fn transform_func_type_with_named_params() {
         assert_transformation(
             "package main;\nfunc test (f func(first, second string)){}",
-            "fn test(f: Fn(string, string)){\n\n}",
+            "fn test(f: Box<dyn Fn(string, string)>){\n\n}",
         );
     }
 
@@ -820,7 +820,7 @@ mod tests {
     fn transform_func_type_with_return_type() {
         assert_transformation(
             "package main;\nfunc test (f func()string){}",
-            "fn test(f: Fn()->string){\n\n}",
+            "fn test(f: Box<dyn Fn()->string>){\n\n}",
         );
     }
 
@@ -1036,5 +1036,13 @@ mod tests {
     #[test]
     fn transform_type_decl_for_array() {
         assert_transformation("package main;\ntype arr=[3]int", "type arr = [int; 3];");
+    }
+
+    #[test]
+    fn transform_type_decl_for_func() {
+        assert_transformation(
+            "package main;\ntype test=func(string)int",
+            "type test = Box<dyn Fn(string)->int>;",
+        );
     }
 }

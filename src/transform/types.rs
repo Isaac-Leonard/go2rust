@@ -64,7 +64,6 @@ pub fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> With
             }
         }
         Type::Interface(interface_type) => convert_interface(name, interface_type, context),
-        Type::Function(func_type) => todo!(),
 
         other => {
             let WithExtraTypes { typ, extras } = convert_unnamed_type(other, context);
@@ -170,7 +169,8 @@ pub fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes
         }
         Type::Interface(interface_type) => {
             let name = generate_type_name(AnonymousType::Interface(interface_type));
-            let WithExtraTypes { typ, extras } = convert_interface(&name, interface_type, context);
+            let WithExtraTypes { typ, mut extras } =
+                convert_interface(&name, interface_type, context);
             extras.push(typ);
             let typ = format!("impl {name}");
             WithExtraTypes { typ, extras }
@@ -240,7 +240,7 @@ pub fn convert_func_type(func_type: &FuncType, context: &mut Context) -> WithExt
         }
     };
 
-    let typ = format!("Fn({params}){result}");
+    let typ = format!("Box<dyn Fn({params}){result}>");
     WithExtraTypes { typ, extras }
 }
 
