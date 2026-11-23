@@ -1045,4 +1045,12 @@ mod tests {
             "type test = Box<dyn Fn(string)->int>;",
         );
     }
+
+    #[test]
+    fn transform_defer_statement() {
+        assert_transformation(
+            "package main;\nfunc test () {defer x();}",
+            "fn test(){\nlet _defer = core::mem::DropGuard::new((), || x());\n}",
+        );
+    }
 }

@@ -6,6 +6,7 @@ use crate::{
         ShortVarDecl, Statement, SwitchStmt,
     },
     name_resolution::Context,
+    transform::expressions::convert_call,
 };
 
 use super::{
@@ -115,6 +116,10 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
         Statement::Branch(branch) => convert_branch_stmt(branch, context),
         Statement::Switch(SwitchStmt::Expr(expr_switch)) => {
             convert_expr_switch_stmt(expr_switch, context)
+        }
+        Statement::Defer(defer_stmt) => {
+            let call = convert_call(&defer_stmt.call, context);
+            format!("let _defer = core::mem::DropGuard::new((), || {call});")
         }
         other => unimplemented!["Cannot yet convert statement {other:?}"],
     }
