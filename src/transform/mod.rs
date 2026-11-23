@@ -1053,4 +1053,12 @@ mod tests {
             "fn test(){\nlet _defer = core::mem::DropGuard::new((), || x());\n}",
         );
     }
+
+    #[test]
+    fn transform_go_statement() {
+        assert_transformation(
+            "package main;\nfunc test () {go x();}",
+            "fn test(){\nstd::thread::spawn(|| x())\n}",
+        );
+    }
 }

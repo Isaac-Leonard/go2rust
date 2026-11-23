@@ -121,6 +121,10 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
             let call = convert_call(&defer_stmt.call, context);
             format!("let _defer = core::mem::DropGuard::new((), || {call});")
         }
+        Statement::Go(go_stmt) => {
+            let call = convert_call(&go_stmt.call, context);
+            format!("std::thread::spawn(|| {call})")
+        }
         other => unimplemented!["Cannot yet convert statement {other:?}"],
     }
 }
