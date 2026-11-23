@@ -165,7 +165,12 @@ pub fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes
             WithExtraTypes { typ, extras }
         }
         Type::Function(func_type) => convert_func_type(func_type, context),
-        Type::Channel(channel_type) => todo!(),
+        Type::Channel(channel_type) => {
+            let WithExtraTypes { typ, extras } = convert_unnamed_type(&channel_type.typ, context);
+            // Not strictly proper but good enough I think.
+            let typ = format!("chan<{typ}>");
+            WithExtraTypes { typ, extras }
+        }
         Type::Interface(interface_type) => todo!(),
     }
 }

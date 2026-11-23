@@ -1016,4 +1016,12 @@ mod tests {
             "trait test {\nfn callme()->string;\n}",
         );
     }
+
+    #[test]
+    fn transform_type_chan() {
+        assert_transformation(
+            "package main;\nfunc test () chan thing{}",
+            "fn test()->chan<thing>{\n\n}",
+        );
+    }
 }
