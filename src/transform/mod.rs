@@ -1024,4 +1024,12 @@ mod tests {
             "fn test()->chan<thing>{\n\n}",
         );
     }
+
+    #[test]
+    fn transform_type_decl_for_chan() {
+        assert_transformation(
+            "package main;\ntype myChan=chan thing",
+            "type myChan = chan<thing>;",
+        );
+    }
 }

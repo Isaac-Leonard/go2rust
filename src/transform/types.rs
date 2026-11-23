@@ -64,15 +64,12 @@ pub fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> With
             }
         }
         Type::Interface(interface_type) => transform_interface(name, interface_type, context),
-        Type::Channel(channel_type) => todo!(),
         Type::Function(func_type) => todo!(),
-        Type::Paren(paren_type) => todo!(),
-        Type::Array(array_type) => todo!(),
 
         other => {
-            unimplemented![
-                "Not all type declarations can be transformed yet, failed to transform {other:?}"
-            ]
+            let WithExtraTypes { typ, extras } = convert_unnamed_type(other, context);
+            let typ = format!("type {name} = {typ};");
+            WithExtraTypes { typ, extras }
         }
     }
 }
