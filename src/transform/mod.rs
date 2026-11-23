@@ -1061,4 +1061,14 @@ mod tests {
             "fn test(){\nstd::thread::spawn(|| x())\n}",
         );
     }
+
+    #[test]
+    fn transform_inc_statement() {
+        assert_transformation("package main;\nfunc test () {i++}", "fn test(){\ni += 1\n}");
+    }
+
+    #[test]
+    fn transform_dec_statement() {
+        assert_transformation("package main;\nfunc test () {i--}", "fn test(){\ni -= 1\n}");
+    }
 }

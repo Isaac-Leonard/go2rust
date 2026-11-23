@@ -1,4 +1,4 @@
-use gosyn::token::Keyword;
+use gosyn::token::{Keyword, Operator};
 
 use crate::{
     ast::{
@@ -124,6 +124,14 @@ pub fn convert_stmt(stmt: &Statement, context: &mut Context) -> String {
         Statement::Go(go_stmt) => {
             let call = convert_call(&go_stmt.call, context);
             format!("std::thread::spawn(|| {call})")
+        }
+        Statement::IncDec(inc_dec_stmt) => {
+            let exp = convert_expr(&inc_dec_stmt.expr, context);
+            match inc_dec_stmt.op {
+                Operator::Inc => format!("{exp} += 1"),
+                Operator::Dec => format!("{exp} -= 1"),
+                other => panic!("Can only have -- or ++ in IncDec statement, got: {other:?}"),
+            }
         }
         other => unimplemented!["Cannot yet convert statement {other:?}"],
     }
