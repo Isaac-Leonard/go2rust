@@ -63,7 +63,7 @@ pub fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> With
                 typ: format!("type {name}<'a> = &'a [{typ}];"),
             }
         }
-        Type::Interface(interface_type) => transform_interface(name, interface_type, context),
+        Type::Interface(interface_type) => convert_interface(name, interface_type, context),
         Type::Function(func_type) => todo!(),
 
         other => {
@@ -74,7 +74,7 @@ pub fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> With
     }
 }
 
-fn transform_interface(
+fn convert_interface(
     name: &str,
     interface_type: &InterfaceType,
     context: &mut Context,
@@ -168,7 +168,13 @@ pub fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes
             let typ = format!("chan<{typ}>");
             WithExtraTypes { typ, extras }
         }
-        Type::Interface(interface_type) => todo!(),
+        Type::Interface(interface_type) => {
+            let name = generate_type_name(AnonymousType::Interface(interface_type));
+            let WithExtraTypes { typ, extras } = convert_interface(&name, interface_type, context);
+            extras.push(typ);
+            let typ = format!("impl {name}");
+            WithExtraTypes { typ, extras }
+        }
     }
 }
 
