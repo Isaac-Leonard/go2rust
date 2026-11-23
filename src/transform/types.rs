@@ -46,8 +46,17 @@ pub fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> With
             let typ = format!("type {name} = {typ};");
             WithExtraTypes { extras, typ }
         }
+        Type::Pointer(ptr) => {
+            let WithExtraTypes { typ, extras } = convert_unnamed_type(&ptr.typ, context);
+            WithExtraTypes {
+                extras,
+                typ: format!("type {name}<'a> = &'a {typ};"),
+            }
+        }
         other => {
-            unimplemented!["Not all types can be transformed yet, failed to transform {other:?}"]
+            unimplemented![
+                "Not all type declarations can be transformed yet, failed to transform {other:?}"
+            ]
         }
     }
 }

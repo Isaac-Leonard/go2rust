@@ -977,4 +977,9 @@ mod tests {
     fn transform_slice_with_second_index() {
         assert_transformation("package main;\nfunc test(){x[:4]}", "fn test(){\nx[..4]\n}");
     }
+
+    #[test]
+    fn transform_declaration_type_pointer() {
+        assert_transformation("package main;\ntype test *int", "type test<'a> = &'a int;");
+    }
 }
