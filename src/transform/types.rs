@@ -1,10 +1,11 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::ast::{
-    ArrayType, Field, FuncType, InstantiatedType, InterfaceType, MapType, NameType, SliceType,
-    StructType, Type, TypeElem, TypeTerm,
+    ArrayType, Field, FuncType, InstantiatedType, InterfaceElem, InterfaceType, MapType,
+    MethodElem, NameType, SliceType, StructType, Type, TypeElem, TypeTerm,
 };
 
+use crate::transform::convert_function_signature;
 use crate::{name_resolution::Context, transform::expressions::convert_expr};
 
 pub struct WithExtraTypes {
@@ -62,9 +63,9 @@ pub fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> With
                 typ: format!("type {name}<'a> = &'a [{typ}];"),
             }
         }
-        Type::Function(func_type) => todo!(),
+        Type::Interface(interface_type) => transform_interface(name, interface_type, context),
         Type::Channel(channel_type) => todo!(),
-        Type::Interface(interface_type) => todo!(),
+        Type::Function(func_type) => todo!(),
         Type::Paren(paren_type) => todo!(),
         Type::Array(array_type) => todo!(),
 
@@ -74,6 +75,42 @@ pub fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> With
             ]
         }
     }
+}
+
+fn transform_interface(
+    name: &str,
+    interface_type: &InterfaceType,
+    context: &mut Context,
+) -> WithExtraTypes {
+    let type_elements = interface_type
+        .elements
+        .iter()
+        .filter_map(|el| match el {
+            InterfaceElem::Type(el) => Some(el),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let extras = vec![];
+    let requirements = match type_elements.as_slice() {
+        [] => "".to_string(),
+        other => panic!(
+            "Cannot transform interfaces with type elements, in interface {name} got type elements: {other:?}"
+        ),
+    };
+    let methods = interface_type
+        .elements
+        .iter()
+        .filter_map(|el| match el {
+            InterfaceElem::Method(el) => Some(el),
+            _ => None,
+        })
+        .map(|method| {
+            convert_function_signature(method.name.name.as_str(), &None, &method.typ, context) + ";"
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let typ = format!("trait {name}{requirements} {{\n{methods}\n}}");
+    WithExtraTypes { typ, extras }
 }
 
 pub fn convert_unnamed_type(typ: &Type, context: &mut Context) -> WithExtraTypes {

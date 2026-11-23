@@ -7,7 +7,10 @@ use statements::convert_block_stmt;
 use types::{WithExtraTypes, convert_named_type, convert_type_element, convert_unnamed_type};
 
 use crate::{
-    ast::{ConstSpec, Decl, Declaration, File, FuncDecl, Import, Type, TypeSpec, VarSpec},
+    ast::{
+        ConstSpec, Decl, Declaration, File, FuncDecl, FuncType, Import, ParameterSpec, Type,
+        TypeSpec, VarSpec,
+    },
     name_resolution::Context,
 };
 
@@ -110,10 +113,42 @@ pub fn convert_variable_decl(var_decl: &Decl<VarSpec>, context: &mut Context) ->
 }
 
 fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
-    let name = &func.name.name;
+    let signature =
+        convert_function_signature(func.name.name.as_str(), &func.recv, &func.typ, context);
+    let recv = &func.recv;
+
+    let func = if let Some(body) = &func.body {
+        let statements = convert_block_stmt(body, context);
+        // Note that `convert_block_stmt` wraps the block in braces so we don't need to wrap the body of the function in braces here
+        format!("{signature}{statements}")
+    } else {
+        format!("unsafe extern \"C\" {{{signature};}}")
+    };
+    if let Some(recv) = recv {
+        let recv_type = &recv[0].typ;
+        let recv_type = match recv_type {
+            Type::Name(_) => recv_type,
+            Type::Pointer(typ) => &*typ.typ,
+            _ => unreachable!(
+                "Reciever types can only be a defined type or pointer to a defined type"
+            ),
+        };
+        let recv_type = convert_unnamed_type(recv_type, context).typ;
+        format!("impl {recv_type} {{\n{func}\n}}")
+    } else {
+        func
+    }
+}
+
+pub fn convert_function_signature(
+    name: &str,
+    recv: &Option<Vec<ParameterSpec>>,
+    func: &FuncType,
+    context: &mut Context,
+) -> String {
     let mut type_params = vec![];
     let mut extras = vec![];
-    for arg in &func.typ.typ_params {
+    for arg in &func.typ_params {
         let WithExtraTypes {
             typ,
             extras: arg_extras,
@@ -133,7 +168,7 @@ fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
     };
 
     let mut params = vec![];
-    for param in &func.typ.params {
+    for param in &func.params {
         let WithExtraTypes {
             typ,
             extras: param_extras,
@@ -171,7 +206,7 @@ fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
             }
         };
     }
-    if let Some(recv) = &func.recv {
+    if let Some(recv) = recv {
         let name = &recv[0].identifiers.first();
         match name {
             None => params.insert(0, "&self".to_string()),
@@ -182,7 +217,7 @@ fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
 
     let mut result = vec![];
 
-    for res in &func.typ.result {
+    for res in &func.result {
         let WithExtraTypes {
             typ,
             extras: res_extras,
@@ -207,29 +242,7 @@ fn convert_function(func: &FuncDecl, context: &mut Context) -> String {
         }
     };
 
-    let recv = &func.recv;
-
-    let func = if let Some(body) = &func.body {
-        let statements = convert_block_stmt(body, context);
-        // Note that `convert_block_stmt` wraps the block in braces so we don't need to wrap the body of the function in braces here
-        format!("fn {name}{type_params}({params}){result}{statements}")
-    } else {
-        format!("unsafe extern \"C\" {{fn {name}{type_params}({params}){result};}}")
-    };
-    if let Some(recv) = recv {
-        let recv_type = &recv[0].typ;
-        let recv_type = match recv_type {
-            Type::Name(_) => recv_type,
-            Type::Pointer(typ) => &*typ.typ,
-            _ => unreachable!(
-                "Reciever types can only be a defined type or pointer to a defined type"
-            ),
-        };
-        let recv_type = convert_unnamed_type(recv_type, context).typ;
-        format!("impl {recv_type} {{\n{func}\n}}")
-    } else {
-        func
-    }
+    format!("fn {name}{type_params}({params}){result}")
 }
 
 #[cfg(test)]
@@ -988,6 +1001,19 @@ mod tests {
         assert_transformation(
             "package main;\ntype test []int",
             "type test<'a> = &'a [int];",
+        );
+    }
+
+    #[test]
+    fn transform_interface_with_no_elements() {
+        assert_transformation("package main;\ntype test interface {}", "trait test {\n\n}");
+    }
+
+    #[test]
+    fn transform_interface_with_one_method() {
+        assert_transformation(
+            "package main;\ntype test interface {callme() string}",
+            "trait test {\nfn callme()->string;\n}",
         );
     }
 }
