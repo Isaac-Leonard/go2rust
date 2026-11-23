@@ -2,8 +2,9 @@ use gosyn::token::{Keyword, Operator};
 
 use crate::{
     ast::{
-        AssignStmt, BlockStmt, BranchStmt, ExprSwitchStmt, Expression, FuncType, Ident, IfStmt,
-        InstantiatedType, NameType, Operation, ShortVarDecl, Statement, SwitchStmt, Type,
+        AssignStmt, BlockStmt, BranchStmt, Call, ExprSwitchStmt, Expression, FuncType, Ident,
+        IfStmt, InstantiatedType, NameType, Operation, QualifiedName, ShortVarDecl, Statement,
+        SwitchStmt, Type,
     },
     name_resolution::Context,
 };
@@ -263,5 +264,27 @@ fn replace_fallthrough_in_statement_in_switch_clause(stmt: &mut Statement) {
 fn replace_fallthrough_in_block_statement_in_switch_clause(block_stmt: &mut BlockStmt) {
     for stmt in &mut block_stmt.list {
         replace_fallthrough_in_statement_in_switch_clause(stmt);
+    }
+}
+
+pub fn replace_make_with_default(expr: &mut Expression, _context: &mut Context) {
+    if let Expression::Call(call) = expr
+        && let Expression::Ident(ident) = call.func.as_ref()
+        && ident.name.as_str() == "make"
+    {
+        *call = Call {
+            func: Box::new(Expression::Type(Type::Name(NameType::Qualified(
+                QualifiedName {
+                    package: Ident {
+                        name: "Default".to_string(),
+                    },
+                    identifier: Ident {
+                        name: "default".to_string(),
+                    },
+                },
+            )))),
+            args: vec![],
+            dots: false,
+        }
     }
 }

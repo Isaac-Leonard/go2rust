@@ -11,7 +11,8 @@ use cli::Cli;
 use hooks::{
     apply::pre,
     pre::{
-        return_slice_to_vec, transform_switches_with_fallthrough_to_if, upper_case_string_types,
+        replace_make_with_default, return_slice_to_vec, transform_switches_with_fallthrough_to_if,
+        upper_case_string_types,
     },
 };
 use name_resolution::Context;
@@ -32,7 +33,7 @@ fn main() {
         types: vec![&upper_case_string_types],
         func_types: vec![&return_slice_to_vec],
         statements: vec![&transform_switches_with_fallthrough_to_if],
-        expressions: vec![],
+        expressions: vec![&replace_make_with_default],
     };
 
     pre::apply(&mut ast, &mut context, &hooks);
