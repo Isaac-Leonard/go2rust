@@ -10,7 +10,9 @@ use clap::Parser;
 use cli::Cli;
 use hooks::{
     apply::pre,
-    pre::{return_slice_to_vec, upper_case_string_types},
+    pre::{
+        return_slice_to_vec, transform_switches_with_fallthrough_to_if, upper_case_string_types,
+    },
 };
 use name_resolution::Context;
 
@@ -29,7 +31,7 @@ fn main() {
     let hooks = pre::Hooks {
         types: vec![&upper_case_string_types],
         func_types: vec![&return_slice_to_vec],
-        statements: vec![],
+        statements: vec![&transform_switches_with_fallthrough_to_if],
         expressions: vec![],
     };
 
