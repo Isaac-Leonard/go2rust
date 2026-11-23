@@ -982,4 +982,12 @@ mod tests {
     fn transform_declaration_type_pointer() {
         assert_transformation("package main;\ntype test *int", "type test<'a> = &'a int;");
     }
+
+    #[test]
+    fn transform_declaration_type_slice() {
+        assert_transformation(
+            "package main;\ntype test []int",
+            "type test<'a> = &'a [int];",
+        );
+    }
 }

@@ -47,12 +47,27 @@ pub fn convert_named_type(name: &str, typ: &Type, context: &mut Context) -> With
             WithExtraTypes { extras, typ }
         }
         Type::Pointer(ptr) => {
+            // We handle this separately so we can add in lifetime anotations.
             let WithExtraTypes { typ, extras } = convert_unnamed_type(&ptr.typ, context);
             WithExtraTypes {
                 extras,
                 typ: format!("type {name}<'a> = &'a {typ};"),
             }
         }
+        Type::Slice(slice) => {
+            // We handle this separately so we can add in lifetime anotations, same as above.
+            let WithExtraTypes { typ, extras } = convert_unnamed_type(&slice.typ, context);
+            WithExtraTypes {
+                extras,
+                typ: format!("type {name}<'a> = &'a [{typ}];"),
+            }
+        }
+        Type::Function(func_type) => todo!(),
+        Type::Channel(channel_type) => todo!(),
+        Type::Interface(interface_type) => todo!(),
+        Type::Paren(paren_type) => todo!(),
+        Type::Array(array_type) => todo!(),
+
         other => {
             unimplemented![
                 "Not all type declarations can be transformed yet, failed to transform {other:?}"
