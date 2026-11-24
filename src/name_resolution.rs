@@ -5,35 +5,36 @@ use crate::{
     utils::VecExt,
 };
 
-fn find_use_idents(ast: gosyn::ast::File) -> Scope {
+fn find_use_idents(ast: &File) -> Scope {
     // TODO Have this be an over arching scope for all files and have proper package scopes.
-    let mut scope = Scope::new_universe();
-    let ast = File::from(ast);
+    let mut top_scope = Scope::new_universe();
+    let mut scope = Scope::default();
     for decl in &ast.decl {
         match decl {
             Declaration::Const(constants) => {
                 for constant in &constants.specs {
+                    let typ = if let Some(typ) = &constant.typ {
+                        typ.clone().into()
+                    } else {
+                        GoType::Unknown
+                    };
+
                     for name in &constant.name {
-                        scope.provided.insert(name.name.clone(), GoType::Unknown);
-                    }
-
-                    if let Some(typ) = &constant.typ {
-                        scope.add_sub_scopes(find_idents_in_type(typ));
-                    }
-
-                    for value in &constant.values {
-                        scope.add_sub_scopes(find_idents_in_expression(&value));
+                        scope.provided.insert(name.name.clone(), typ.clone());
                     }
                 }
             }
             Declaration::Variable(variables) => {
                 for variables in &variables.specs {
-                    for name in &variables.name {
-                        scope.add_provided(name.name.clone(), GoType::Unknown);
-                    }
+                    let typ = if let Some(typ) = &variables.typ {
+                        scope.add_sub_scopes(find_scopes_in_type(typ));
+                        typ.clone().into()
+                    } else {
+                        GoType::Unknown
+                    };
 
-                    if let Some(typ) = &variables.typ {
-                        scope.add_sub_scopes(find_idents_in_type(typ));
+                    for name in &variables.name {
+                        scope.add_variable(name.name.clone(), GoType::Unknown);
                     }
 
                     for value in &variables.values {
@@ -42,7 +43,10 @@ fn find_use_idents(ast: gosyn::ast::File) -> Scope {
                 }
             }
             Declaration::Function(func_decl) => {
-                scope.add_provided(func_decl.name.name.clone(), GoType::Unknown);
+                scope.add_variable(
+                    func_decl.name.name.clone(),
+                    Type::Function(func_decl.typ.clone()).into(),
+                );
                 let mut sub_scope = Scope::default();
                 // For if this function is a method
                 // TODO Check if recv can actually have more then one value
@@ -54,15 +58,14 @@ fn find_use_idents(ast: gosyn::ast::File) -> Scope {
             }
             Declaration::Type(decl) => {
                 for typ in &decl.specs {
-                    scope.add_provided(typ.name.name.clone(), GoType::Unknown);
-                    let mut sub_scope = Scope::default();
-                    sub_scope.add_sub_scopes(find_idents_in_type(&typ.typ));
-                    scope.add_sub_scope(sub_scope);
+                    scope.add_type(typ.name.name.clone(), typ.typ.clone());
+                    scope.add_sub_scopes(find_scopes_in_type(&typ.typ));
                 }
             }
         }
     }
-    scope
+    top_scope.add_sub_scope(scope);
+    top_scope
 }
 
 fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
@@ -166,30 +169,34 @@ fn find_idents_in_expression(exp: &Expression) -> Vec<Scope> {
         Expression::TypeAssert(type_assertion) => {
             let left = find_idents_in_expression(&type_assertion.left);
             if let Some(right) = &type_assertion.right {
-                let right = find_idents_in_type(&right);
+                let right = find_scopes_in_type(&right);
                 left.concat(right)
             } else {
                 left
             }
         }
         Expression::CompositeLit(composite_lit) => todo!(),
-        Expression::Type(typ) => find_idents_in_type(typ),
+        Expression::Type(typ) => find_scopes_in_type(typ),
     }
 }
 
-fn find_idents_in_type(typ: &Type) -> Vec<Scope> {
+fn find_scopes_in_type(typ: &Type) -> Vec<Scope> {
     match typ {
-        Type::Map(map_type) => todo!(),
-        Type::Array(array_type) => todo!(),
-        Type::Slice(slice_type) => todo!(),
+        Type::Map(map_type) => {
+            let key = find_scopes_in_type(&map_type.key);
+            let val = find_scopes_in_type(&map_type.val);
+            key.concat(val)
+        }
+        Type::Array(array_type) => find_scopes_in_type(&array_type.typ),
+        Type::Slice(slice_type) => find_scopes_in_type(&slice_type.typ),
         Type::Function(func_type) => todo!(),
         Type::Struct(struct_type) => todo!(),
-        Type::Channel(channel_type) => todo!(),
-        Type::Pointer(pointer_type) => todo!(),
+        Type::Channel(channel_type) => find_scopes_in_type(&channel_type.typ),
+        Type::Pointer(pointer_type) => find_scopes_in_type(&pointer_type.typ),
         Type::Interface(interface_type) => todo!(),
-        Type::Name(name_type) => todo!(),
+        Type::Name(name_type) => vec![],
         Type::Instantiated(instantiated_type) => todo!(),
-        Type::Paren(typ) => find_idents_in_type(&*typ.typ),
+        Type::Paren(typ) => find_scopes_in_type(&typ.typ),
     }
 }
 
@@ -268,12 +275,20 @@ impl Scope {
         }
     }
 
-    pub fn add_provided(&mut self, provided: String, typ: GoType) {
+    pub fn add_variable(&mut self, provided: String, typ: GoType) {
         self.provided.insert(provided, typ);
     }
 
     pub fn add_provideds<I: IntoIterator<Item = (String, GoType)>>(&mut self, provided: I) {
         self.provided.extend(provided);
+    }
+
+    pub fn add_type(&mut self, name: String, typ: impl Into<GoType>) {
+        self.types.insert(name, typ.into());
+    }
+
+    pub fn add_types<I: IntoIterator<Item = (String, GoType)>>(&mut self, types: I) {
+        self.types.extend(types);
     }
 
     pub fn add_sub_scope(&mut self, sub_scope: Scope) {
@@ -357,5 +372,52 @@ pub enum GoType {
 impl From<Type> for GoType {
     fn from(value: Type) -> Self {
         Self::Declared(value)
+    }
+}
+
+#[cfg(test)]
+pub mod test {
+    use std::assert_matches;
+
+    use gosyn::Parser;
+
+    use crate::{
+        ast::{NameType, Type},
+        name_resolution::{GoType, find_use_idents},
+    };
+
+    use super::Scope;
+
+    fn get_scope_for(src: &'static str) -> Scope {
+        let mut parser = Parser::from(src);
+        let file = parser
+            .parse_file()
+            .inspect_err(|e| eprintln!("{e:?}"))
+            .unwrap()
+            .into();
+
+        find_use_idents(&file)
+    }
+
+    #[test]
+    fn empty_file_produces_universe_with_one_empty_subscope() {
+        let scope = get_scope_for("package main");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].provided.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_one_type_decl() {
+        let scope = get_scope_for("package main\ntype id int");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 1);
+        assert_matches!(
+            scope.sub_scopes[0].types.get("id"),
+            Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.name.as_str()=="int"
+        );
+        assert_eq!(scope.sub_scopes[0].provided.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
     }
 }
