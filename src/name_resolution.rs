@@ -47,9 +47,9 @@ fn find_use_idents(ast: &File) -> Scope {
             Declaration::Function(func_decl) => {
                 scope.add_variable(
                     func_decl.name.name.clone(),
-                    Type::Function(func_decl.typ.clone()).into(),
+                    GoType::Function(func_decl.typ.clone()),
                 );
-                let mut sub_scope = Scope::default();
+                let mut sub_scope = get_scope_for_function_type(&func_decl.typ);
                 // For if this function is a method
                 // TODO Check if recv can actually have more then one value
 
@@ -412,6 +412,7 @@ pub enum GoType {
     String,
     Int,
     Float,
+    Function(FuncType),
     Declared(Type),
     Unknown,
     TypeParam(TypeElem),
@@ -522,6 +523,61 @@ pub mod test {
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
         // the function type does not have named arguments but has one named result.
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 1);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_function_decl_with_named_arguments_and_named_result() {
+        let scope = get_scope_for("package main\nfunc test (first, last name) (age int)");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_matches!(
+            scope.sub_scopes[0].provided.get("test"),
+            Some(GoType::Function(_))
+        );
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        // 2 named params + 1 named result
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 3);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_function_decl_with_type_params() {
+        let scope = get_scope_for("package main\nfunc test[a, b any](first a, last b) (int){}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_matches!(
+            scope.sub_scopes[0].provided.get("test"),
+            Some(GoType::Function(_))
+        );
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 2);
+        assert_matches!(
+            scope.sub_scopes[0].sub_scopes[0].types["a"],
+            GoType::TypeParam(_)
+        );
+        assert_matches!(
+            scope.sub_scopes[0].sub_scopes[0].types["b"],
+            GoType::TypeParam(_)
+        );
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 2);
+        assert_matches!(
+            &scope.sub_scopes[0].sub_scopes[0].provided["first"],
+            GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "a"
+        );
+        assert_matches!(
+            &scope.sub_scopes[0].sub_scopes[0].provided["last"],
+            GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "b"
+        );
+
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
     }
 }
