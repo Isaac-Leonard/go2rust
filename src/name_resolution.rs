@@ -41,26 +41,33 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
     match statement {
         Statement::Go(go) => scope.add_sub_scopes(find_idents_in_call(&go.call)),
         Statement::If(if_stmt) => {
-            let mut init_scope = Scope::default();
-            if let Some(init) = &if_stmt.init {
+            let scope = if let Some(init) = &if_stmt.init {
+                let mut init_scope = Scope::default();
                 find_idents_in_statement(init, &mut init_scope);
-            }
-            init_scope.add_sub_scopes(find_idents_in_expression(&if_stmt.cond));
+                scope.add_sub_scope(init_scope)
+            } else {
+                scope
+            };
+            scope.add_sub_scopes(find_idents_in_expression(&if_stmt.cond));
             let mut if_scope = Scope::default();
             find_idents_in_block(&if_stmt.body, &mut if_scope);
-            init_scope.add_sub_scope(if_scope);
+            scope.add_sub_scope(if_scope);
             if let Some(else_stmt) = &if_stmt.else_ {
-                let mut else_scope = Scope::default();
-                find_idents_in_statement(else_stmt, &mut else_scope);
-                init_scope.add_sub_scope(else_scope)
+                // We don't create a separate scope here because one will be created already as the else statement must be an if statement or a block.
+                find_idents_in_statement(else_stmt, scope);
             }
-            scope.add_sub_scope(init_scope)
         }
         Statement::For(for_stmt) => todo!(),
         Statement::Send(send_stmt) => todo!(),
         Statement::Expr(expr_stmt) => todo!(),
         Statement::Defer(defer_stmt) => todo!(),
-        Statement::Block(block_stmt) => todo!(),
+        Statement::Block(block_stmt) => {
+            let mut sub_scope = Scope::default();
+            for stmt in &block_stmt.list {
+                find_idents_in_statement(stmt, &mut sub_scope);
+            }
+            scope.add_sub_scope(sub_scope);
+        }
         Statement::Range(range_stmt) => todo!(),
         Statement::Empty(empty_stmt) => todo!(),
         Statement::Label(labeled_stmt) => todo!(),
@@ -357,8 +364,8 @@ impl Scope {
         self.types.extend(types);
     }
 
-    pub fn add_sub_scope(&mut self, sub_scope: Scope) {
-        self.sub_scopes.push(sub_scope);
+    pub fn add_sub_scope(&mut self, sub_scope: Scope) -> &mut Scope {
+        self.sub_scopes.push_mut(sub_scope)
     }
 
     pub fn add_sub_scopes(&mut self, sub_scopes: Vec<Scope>) {
@@ -714,5 +721,199 @@ pub mod test {
         );
 
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_function_with_simple_if_statement() {
+        let scope = get_scope_for("package main\nfunc test(){\nif true {}}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .sub_scopes
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn file_with_function_with_if_statement_with_init() {
+        let scope = get_scope_for("package main\nfunc test(){\nif ok:=check(); ok {}}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .variables
+                .len(),
+            1
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .sub_scopes
+                .len(),
+            1
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .types
+                .len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .sub_scopes
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn file_with_function_with_if_statement_with_else() {
+        let scope = get_scope_for("package main\nfunc test(){\nif true {} else {};}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 2);
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .sub_scopes
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[1].types.len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[1]
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[1]
+                .sub_scopes
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn file_with_function_with_if_statement_with_if_else() {
+        let scope =
+            get_scope_for("package main\nfunc test(){\nif true {} else if false {} else {};}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 3);
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .sub_scopes
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[1].types.len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[1]
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[1]
+                .sub_scopes
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[2].types.len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[2]
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[2]
+                .sub_scopes
+                .len(),
+            0
+        );
     }
 }
