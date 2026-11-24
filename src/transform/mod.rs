@@ -48,7 +48,7 @@ fn convert_type_decl(type_d: &Decl<TypeSpec>, context: &mut Context) -> String {
     for spec in &type_d.specs {
         context
             .types
-            .insert(spec.name.name.clone(), spec.typ.clone());
+            .insert(spec.name.name.clone(), spec.typ.clone().into());
         type_decls.extend(convert_named_type(&spec.name.name, &spec.typ, context));
     }
     type_decls.join("\n")
@@ -250,7 +250,7 @@ mod tests {
     use gosyn::Parser;
 
     use super::convert_ast;
-    use crate::Context;
+    use crate::{Context, name_resolution::Scope};
 
     /// Transforms the golang string into rust then asserts that it is exactly equal to the given rust string.
     fn assert_transformation(golang: &str, rust: &str) {
@@ -259,7 +259,8 @@ mod tests {
             .parse_file()
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
-        let res = convert_ast(file.into(), &mut Context::default()).unwrap();
+        let mut scope = Scope::new_universe();
+        let res = convert_ast(file.into(), &mut Context::new(&mut scope)).unwrap();
         assert_eq!(res, rust);
     }
 

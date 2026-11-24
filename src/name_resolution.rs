@@ -1,23 +1,9 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::ast::{
-    BlockStmt, Call, Declaration, Expression, File, Ident, NameType, Statement, Type,
+use crate::{
+    ast::{BlockStmt, Call, Declaration, Expression, File, Ident, NameType, Statement, Type},
+    utils::VecExt,
 };
-
-#[derive(Default)]
-pub struct Context {
-    pub types: HashMap<String, Type>,
-    pub variables: HashMap<String, Option<Type>>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum GoValue {
-    Int(String),
-    Float32(String),
-    String(String),
-    Slice(Vec<GoValue>),
-    Other,
-}
 
 fn find_use_idents(ast: gosyn::ast::File) -> Scope {
     // TODO Have this be an over arching scope for all files and have proper package scopes.
@@ -132,13 +118,13 @@ fn find_idents_in_expression(exp: &Expression) -> Vec<Scope> {
         Expression::Index(index) => {
             let left = find_idents_in_expression(&index.left);
             let right = find_idents_in_expression(&index.index);
-            [left, right].concat()
+            left.concat(right)
         }
         Expression::Operation(op) => {
             let left = find_idents_in_expression(&op.x);
             if let Some(right) = &op.y {
                 let right = find_idents_in_expression(&right);
-                [left, right].concat()
+                left.concat(right)
             } else {
                 left
             }
@@ -181,7 +167,7 @@ fn find_idents_in_expression(exp: &Expression) -> Vec<Scope> {
             let left = find_idents_in_expression(&type_assertion.left);
             if let Some(right) = &type_assertion.right {
                 let right = find_idents_in_type(&right);
-                [left, right].concat()
+                left.concat(right)
             } else {
                 left
             }
@@ -216,10 +202,10 @@ pub fn find_idents_in_call(call: &Call) -> Vec<Scope> {
 }
 
 /// Contains lists of variables declared and used in a given program scope such as the entire program or a function.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct Scope {
     //Named generics, or declared types in this scope
-    types: HashMap<String, GoType>,
+    pub types: HashMap<String, GoType>,
     /// function arguments or variables declared in this scope
     provided: HashMap<String, GoType>,
     /// Functions declared in this scope with their own arguments and local variables
@@ -299,14 +285,23 @@ impl Scope {
     }
 }
 
-pub struct ScopeContext<'a> {
+pub struct Context<'a> {
     scope: &'a mut Scope,
     pos: usize,
     parent_variables: Vec<&'a HashMap<String, GoType>>,
     parent_types: Vec<&'a HashMap<String, GoType>>,
 }
 
-impl<'a> ScopeContext<'a> {
+impl<'a> Context<'a> {
+    pub fn new(scope: &'a mut Scope) -> Self {
+        Self {
+            scope,
+            pos: 0,
+            parent_variables: vec![],
+            parent_types: vec![],
+        }
+    }
+
     pub fn next_scope(&'a mut self) -> Option<Self> {
         let Self {
             scope,
@@ -335,6 +330,20 @@ impl<'a> ScopeContext<'a> {
     }
 }
 
+impl<'a> std::ops::DerefMut for Context<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.scope
+    }
+}
+
+impl<'a> std::ops::Deref for Context<'a> {
+    type Target = Scope;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.scope
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum GoType {
     Bool,
@@ -343,4 +352,10 @@ pub enum GoType {
     Float,
     Declared(Type),
     Unknown,
+}
+
+impl From<Type> for GoType {
+    fn from(value: Type) -> Self {
+        Self::Declared(value)
+    }
 }

@@ -15,7 +15,7 @@ use hooks::{
         upper_case_string_types,
     },
 };
-use name_resolution::Context;
+use name_resolution::{Context, Scope};
 
 fn main() {
     let cli = Cli::parse();
@@ -26,7 +26,8 @@ fn main() {
             return;
         }
     };
-    let mut context = Context::default();
+    let mut scope = Scope::new_universe();
+    let mut context = Context::new(&mut scope);
 
     let mut ast = ast.into();
     let hooks = pre::Hooks {
@@ -38,7 +39,7 @@ fn main() {
 
     pre::apply(&mut ast, &mut context, &hooks);
 
-    match transform::convert_ast(ast, &mut Context::default()) {
+    match transform::convert_ast(ast, &mut context) {
         Ok(converted) => {
             if let Some(output) = cli.output {
                 if let Err(err) = std::fs::write(output, converted) {
