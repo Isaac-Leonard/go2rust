@@ -1,4 +1,4 @@
-#Go2Rust
+# Go2Rust
 A tool to help convert Golang code to rust.
 ## What it can do
 ## What it cannot do
