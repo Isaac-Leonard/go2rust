@@ -117,7 +117,7 @@ fn add_const_decl_to_scope(decl: &crate::ast::Decl<crate::ast::ConstSpec>, scope
         };
 
         for name in &constant.name {
-            scope.provided.insert(name.name.clone(), typ.clone());
+            scope.variables.insert(name.name.clone(), typ.clone());
         }
     }
 }
@@ -180,7 +180,7 @@ fn find_idents_in_expression(exp: &Expression) -> Vec<Scope> {
         Expression::FuncLit(func_lit) => todo!(),
         Expression::Ellipsis(ellipsis) => todo!(),
         Expression::Selector(selector) => {
-            let mut idents = find_idents_in_expression(&selector.x);
+            let idents = find_idents_in_expression(&selector.x);
             // idents.push(Referenced(selector.sel.name.clone()));
             idents
         }
@@ -190,7 +190,7 @@ fn find_idents_in_expression(exp: &Expression) -> Vec<Scope> {
         Expression::TypeAssert(type_assertion) => {
             let left = find_idents_in_expression(&type_assertion.left);
             if let Some(right) = &type_assertion.right {
-                let right = find_scopes_in_type(&right);
+                let right = find_scopes_in_type(right);
                 left.concat(right)
             } else {
                 left
@@ -280,7 +280,7 @@ pub struct Scope {
     //Named generics, or declared types in this scope
     pub types: HashMap<String, GoType>,
     /// function arguments or variables declared in this scope
-    provided: HashMap<String, GoType>,
+    variables: HashMap<String, GoType>,
     /// Functions declared in this scope with their own arguments and local variables
     sub_scopes: Vec<Scope>,
 }
@@ -288,12 +288,12 @@ pub struct Scope {
 impl Scope {
     pub fn new(
         types: HashMap<String, GoType>,
-        provided: HashMap<String, GoType>,
+        variables: HashMap<String, GoType>,
         sub_scopes: Vec<Scope>,
     ) -> Self {
         Self {
             types,
-            provided,
+            variables,
             sub_scopes,
         }
     }
@@ -327,7 +327,7 @@ impl Scope {
             .into_iter()
             .map(|name| (name.to_string(), GoType::Unknown))
             .collect(),
-            provided: [
+            variables: [
                 "Append", "Copy", "Clear", "Close", "complex", "real", "imag", "delete", "len",
                 "cap", "make", "min", "max", "new", "panic", "recover", "print",
                 "println", //functions
@@ -341,12 +341,12 @@ impl Scope {
         }
     }
 
-    pub fn add_variable(&mut self, provided: String, typ: GoType) {
-        self.provided.insert(provided, typ);
+    pub fn add_variable(&mut self, name: String, typ: GoType) {
+        self.variables.insert(name, typ);
     }
 
-    pub fn add_provideds<I: IntoIterator<Item = (String, GoType)>>(&mut self, provided: I) {
-        self.provided.extend(provided);
+    pub fn add_variables<I: IntoIterator<Item = (String, GoType)>>(&mut self, variables: I) {
+        self.variables.extend(variables);
     }
 
     pub fn add_type(&mut self, name: String, typ: impl Into<GoType>) {
@@ -392,7 +392,7 @@ impl<'a> Context<'a> {
         } = self;
         let sub_scope = scope.sub_scopes.get_mut(*pos)?;
         *pos += 1;
-        let mut new_parent_variables = vec![&scope.provided];
+        let mut new_parent_variables = vec![&scope.variables];
         for variables in parent_variables.iter() {
             new_parent_variables.push(variables)
         }
@@ -472,7 +472,7 @@ pub mod test {
         let scope = get_scope_for("package main");
         assert_eq!(scope.sub_scopes.len(), 1);
         assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].provided.len(), 0);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 0);
         assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
     }
 
@@ -485,7 +485,7 @@ pub mod test {
             scope.sub_scopes[0].types.get("id"),
             Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.name.as_str()=="int"
         );
-        assert_eq!(scope.sub_scopes[0].provided.len(), 0);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 0);
         assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
     }
 
@@ -503,7 +503,7 @@ pub mod test {
             scope.sub_scopes[0].types.get("test"),
             Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.name.as_str()=="string"
         );
-        assert_eq!(scope.sub_scopes[0].provided.len(), 0);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 0);
         assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
     }
 
@@ -512,8 +512,8 @@ pub mod test {
         let scope = get_scope_for("package main\nvar id = 10");
         assert_eq!(scope.sub_scopes.len(), 1);
         assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
-        assert_matches!(&scope.sub_scopes[0].provided["id"], GoType::Unknown);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
+        assert_matches!(&scope.sub_scopes[0].variables["id"], GoType::Unknown);
         assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
     }
 
@@ -522,8 +522,8 @@ pub mod test {
         let scope = get_scope_for("package main\nconst id = 10");
         assert_eq!(scope.sub_scopes.len(), 1);
         assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
-        assert_matches!(&scope.sub_scopes[0].provided["id"], GoType::Unknown);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
+        assert_matches!(&scope.sub_scopes[0].variables["id"], GoType::Unknown);
         assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
     }
 
@@ -537,12 +537,12 @@ pub mod test {
             Some(GoType::Declared(Type::Function(_)))
         );
 
-        assert_eq!(scope.sub_scopes[0].provided.len(), 0);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 0);
         assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
 
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
         // the function type has 2 arguments and no names in the return type.
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 2);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 2);
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
     }
 
@@ -556,12 +556,12 @@ pub mod test {
             Some(GoType::Declared(Type::Function(_)))
         );
 
-        assert_eq!(scope.sub_scopes[0].provided.len(), 0);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 0);
         assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
 
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
         // the function type does not have named arguments but has one named result.
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 1);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 1);
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
     }
 
@@ -570,9 +570,9 @@ pub mod test {
         let scope = get_scope_for("package main\nfunc test (first, last name) (age int)");
         assert_eq!(scope.sub_scopes.len(), 1);
         assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].provided.get("test"),
+            scope.sub_scopes[0].variables.get("test"),
             Some(GoType::Function(_))
         );
 
@@ -580,7 +580,7 @@ pub mod test {
 
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
         // 2 named params + 1 named result
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 3);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 3);
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
     }
 
@@ -589,9 +589,9 @@ pub mod test {
         let scope = get_scope_for("package main\nfunc test[a, b any](first a, last b) (int){}");
         assert_eq!(scope.sub_scopes.len(), 1);
         assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].provided.get("test"),
+            scope.sub_scopes[0].variables.get("test"),
             Some(GoType::Function(_))
         );
 
@@ -607,13 +607,13 @@ pub mod test {
             GoType::TypeParam(_)
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 2);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 2);
         assert_matches!(
-            &scope.sub_scopes[0].sub_scopes[0].provided["first"],
+            &scope.sub_scopes[0].sub_scopes[0].variables["first"],
             GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "a"
         );
         assert_matches!(
-            &scope.sub_scopes[0].sub_scopes[0].provided["last"],
+            &scope.sub_scopes[0].sub_scopes[0].variables["last"],
             GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "b"
         );
 
@@ -625,9 +625,9 @@ pub mod test {
         let scope = get_scope_for("package main\nfunc test(){\nhello:=\"world\"}");
         assert_eq!(scope.sub_scopes.len(), 1);
         assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].provided.get("test"),
+            scope.sub_scopes[0].variables.get("test"),
             Some(GoType::Function(_))
         );
 
@@ -635,9 +635,9 @@ pub mod test {
 
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 1);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 1);
         assert_matches!(
-            &scope.sub_scopes[0].sub_scopes[0].provided["hello"],
+            &scope.sub_scopes[0].sub_scopes[0].variables["hello"],
             GoType::Unknown
         );
 
@@ -649,9 +649,9 @@ pub mod test {
         let scope = get_scope_for("package main\nfunc test(){\nvar hello = \"world\"}");
         assert_eq!(scope.sub_scopes.len(), 1);
         assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].provided.get("test"),
+            scope.sub_scopes[0].variables.get("test"),
             Some(GoType::Function(_))
         );
 
@@ -659,9 +659,9 @@ pub mod test {
 
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 1);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 1);
         assert_matches!(
-            &scope.sub_scopes[0].sub_scopes[0].provided["hello"],
+            &scope.sub_scopes[0].sub_scopes[0].variables["hello"],
             GoType::Unknown
         );
 
@@ -673,9 +673,9 @@ pub mod test {
         let scope = get_scope_for("package main\nfunc test(){\ntype name string}");
         assert_eq!(scope.sub_scopes.len(), 1);
         assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].provided.get("test"),
+            scope.sub_scopes[0].variables.get("test"),
             Some(GoType::Function(_))
         );
 
@@ -687,7 +687,7 @@ pub mod test {
             GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "string"
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
 
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
     }
@@ -697,9 +697,9 @@ pub mod test {
         let scope = get_scope_for("package main\nfunc test(){\nconst hello = \"world\"}");
         assert_eq!(scope.sub_scopes.len(), 1);
         assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].provided.get("test"),
+            scope.sub_scopes[0].variables.get("test"),
             Some(GoType::Function(_))
         );
 
@@ -707,9 +707,9 @@ pub mod test {
 
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 1);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 1);
         assert_matches!(
-            &scope.sub_scopes[0].sub_scopes[0].provided["hello"],
+            &scope.sub_scopes[0].sub_scopes[0].variables["hello"],
             GoType::Unknown
         );
 

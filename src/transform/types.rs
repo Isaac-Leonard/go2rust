@@ -271,7 +271,9 @@ fn convert_name(name: &NameType) -> String {
 }
 
 enum AnonymousType<'a> {
+    #[allow(dead_code)]
     Struct(&'a StructType),
+    #[allow(dead_code)]
     Interface(&'a InterfaceType),
 }
 

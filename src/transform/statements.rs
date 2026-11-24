@@ -211,8 +211,8 @@ fn convert_range_stmt(range_stmt: &RangeStmt, context: &mut Context) -> String {
         (None, None) => panic!("Cannot have range loop without a key or value"),
     };
 
-    let mut expr = convert_expr(&range_stmt.expr, context);
-    let mut body = convert_block_stmt(&range_stmt.body, context);
+    let expr = convert_expr(&range_stmt.expr, context);
+    let body = convert_block_stmt(&range_stmt.body, context);
 
     // TODO We need to find a way to assign the variables outside of the loop scope if a simple "=" operator is used instead of ":=" for the range expression.
     format!("for {decl} in {expr} {body}")
@@ -249,7 +249,7 @@ fn convert_expr_switch_stmt(switch: &ExprSwitchStmt, context: &mut Context) -> S
             .unwrap_or_else(|| "true".to_string());
         let mut cases = vec![];
         for case in &switch.block.body {
-            let mut conditions = case
+            let conditions = case
                 .list
                 .iter()
                 .map(|cond| convert_expr(cond, context))
@@ -276,7 +276,7 @@ fn convert_expr_switch_stmt(switch: &ExprSwitchStmt, context: &mut Context) -> S
         let tag = convert_expr(tag, context);
         let mut cases = vec![];
         for case in &switch.block.body {
-            let mut conditions = case
+            let conditions = case
                 .list
                 .iter()
                 .map(|cond| convert_expr(cond, context))
