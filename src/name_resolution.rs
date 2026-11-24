@@ -58,9 +58,13 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
             }
         }
         Statement::For(for_stmt) => todo!(),
-        Statement::Send(send_stmt) => todo!(),
-        Statement::Expr(expr_stmt) => todo!(),
-        Statement::Defer(defer_stmt) => todo!(),
+        Statement::Send(send_stmt) => {
+            scope.add_sub_scopes(find_idents_in_expression(&send_stmt.value))
+        }
+        Statement::Expr(expr_stmt) => {
+            scope.add_sub_scopes(find_idents_in_expression(&expr_stmt.expr))
+        }
+        Statement::Defer(defer_stmt) => scope.add_sub_scopes(find_idents_in_call(&defer_stmt.call)),
         Statement::Block(block_stmt) => {
             let mut sub_scope = Scope::default();
             for stmt in &block_stmt.list {
@@ -69,14 +73,21 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
             scope.add_sub_scope(sub_scope);
         }
         Statement::Range(range_stmt) => todo!(),
-        Statement::Empty(empty_stmt) => todo!(),
-        Statement::Label(labeled_stmt) => todo!(),
-        Statement::IncDec(inc_dec_stmt) => todo!(),
+        Statement::Label(labeled_stmt) => {
+            // a labeled statement does not need a new scope unless it's an if or for statement or something in which case a new scope will be made for that statement specificly.
+            find_idents_in_statement(&labeled_stmt.stmt, scope)
+        }
+        Statement::IncDec(inc_dec_stmt) => {
+            scope.add_sub_scopes(find_idents_in_expression(&inc_dec_stmt.expr))
+        }
         Statement::Assign(assign_stmt) => {
             assign_stmt.op;
         }
-        Statement::Return(return_stmt) => todo!(),
-        Statement::Branch(branch_stmt) => todo!(),
+        Statement::Return(return_stmt) => {
+            for ret in &return_stmt.ret {
+                scope.add_sub_scopes(find_idents_in_expression(ret))
+            }
+        }
         Statement::Switch(switch_stmt) => todo!(),
         Statement::Select(select_stmt) => todo!(),
         Statement::Declaration(decl_stmt) => match decl_stmt {
@@ -92,6 +103,9 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
             for value in &short_var_decl.values {
                 scope.add_sub_scopes(find_idents_in_expression(value));
             }
+        }
+        Statement::Branch(_) | Statement::Empty(_) => {
+            // These contain no declarations or anonymous functions so we have nothing to do.
         }
     }
 }
