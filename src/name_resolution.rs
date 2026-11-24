@@ -28,7 +28,7 @@ fn find_use_idents(ast: gosyn::ast::File) -> Scope {
             Declaration::Const(constants) => {
                 for constant in &constants.specs {
                     for name in &constant.name {
-                        scope.provided.push(name.name.clone())
+                        scope.provided.insert(name.name.clone(), GoType::Unknown);
                     }
 
                     if let Some(typ) = &constant.typ {
@@ -43,7 +43,7 @@ fn find_use_idents(ast: gosyn::ast::File) -> Scope {
             Declaration::Variable(variables) => {
                 for variables in &variables.specs {
                     for name in &variables.name {
-                        scope.add_provided(name.name.clone())
+                        scope.add_provided(name.name.clone(), GoType::Unknown);
                     }
 
                     if let Some(typ) = &variables.typ {
@@ -56,7 +56,7 @@ fn find_use_idents(ast: gosyn::ast::File) -> Scope {
                 }
             }
             Declaration::Function(func_decl) => {
-                scope.add_provided(func_decl.name.name.clone());
+                scope.add_provided(func_decl.name.name.clone(), GoType::Unknown);
                 let mut sub_scope = Scope::default();
                 // For if this function is a method
                 // TODO Check if recv can actually have more then one value
@@ -68,7 +68,7 @@ fn find_use_idents(ast: gosyn::ast::File) -> Scope {
             }
             Declaration::Type(decl) => {
                 for typ in &decl.specs {
-                    scope.add_provided(typ.name.name.clone());
+                    scope.add_provided(typ.name.name.clone(), GoType::Unknown);
                     let mut sub_scope = Scope::default();
                     sub_scope.add_sub_scopes(find_idents_in_type(&typ.typ));
                     scope.add_sub_scope(sub_scope);
@@ -219,15 +219,19 @@ pub fn find_idents_in_call(call: &Call) -> Vec<Scope> {
 #[derive(Clone, Debug, Default)]
 pub struct Scope {
     //Named generics, or declared types in this scope
-    types: Vec<UnknownType>,
+    types: HashMap<String, GoType>,
     /// function arguments or variables declared in this scope
-    provided: Vec<String>,
+    provided: HashMap<String, GoType>,
     /// Functions declared in this scope with their own arguments and local variables
     sub_scopes: Vec<Scope>,
 }
 
 impl Scope {
-    pub fn new(types: Vec<UnknownType>, provided: Vec<String>, sub_scopes: Vec<Scope>) -> Self {
+    pub fn new(
+        types: HashMap<String, GoType>,
+        provided: HashMap<String, GoType>,
+        sub_scopes: Vec<Scope>,
+    ) -> Self {
         Self {
             types,
             provided,
@@ -236,7 +240,7 @@ impl Scope {
     }
 
     pub fn new_universe() -> Self {
-        let universe = Self {
+        Self {
             types: [
                 "any",
                 "bool",
@@ -262,12 +266,7 @@ impl Scope {
                 "uintptr",
             ]
             .into_iter()
-            .map(|name| UnknownType {
-                name: name.to_string(),
-                typ: Type::Name(NameType::Ident(Ident {
-                    name: "Unknown".to_string(),
-                })),
-            })
+            .map(|name| (name.to_string(), GoType::Unknown))
             .collect(),
             provided: [
                 "Append", "Copy", "Clear", "Close", "complex", "real", "imag", "delete", "len",
@@ -277,18 +276,17 @@ impl Scope {
                 "nil",  // Zero value:
             ]
             .into_iter()
-            .map(|s| s.to_string())
+            .map(|s| (s.to_string(), GoType::Unknown))
             .collect(),
             sub_scopes: vec![],
-        };
-        universe
+        }
     }
 
-    pub fn add_provided(&mut self, provided: String) {
-        self.provided.push(provided);
+    pub fn add_provided(&mut self, provided: String, typ: GoType) {
+        self.provided.insert(provided, typ);
     }
 
-    pub fn add_provideds<I: IntoIterator<Item = String>>(&mut self, provided: I) {
+    pub fn add_provideds<I: IntoIterator<Item = (String, GoType)>>(&mut self, provided: I) {
         self.provided.extend(provided);
     }
 
@@ -301,29 +299,48 @@ impl Scope {
     }
 }
 
-pub enum InferedType {
-    Unknown(Rc<RefCell<UnknownVariable>>),
-    Add(Box<InferedType>, GoValue),
-    Type(Type),
+pub struct ScopeContext<'a> {
+    scope: &'a mut Scope,
+    pos: usize,
+    parent_variables: Vec<&'a HashMap<String, GoType>>,
+    parent_types: Vec<&'a HashMap<String, GoType>>,
 }
 
-pub enum GoType {
-    Bool,
-    String,
-    Declared(Type),
-}
+impl<'a> ScopeContext<'a> {
+    pub fn next_scope(&'a mut self) -> Option<Self> {
+        let Self {
+            scope,
+            pos,
+            parent_variables,
+            parent_types,
+        } = self;
+        let sub_scope = scope.sub_scopes.get_mut(*pos)?;
+        *pos += 1;
+        let mut new_parent_variables = vec![&scope.provided];
+        for variables in parent_variables.iter() {
+            new_parent_variables.push(variables)
+        }
 
-pub struct UnknownVariable {
-    name: String,
-    typ: Option<Type>,
+        let mut new_parent_types = vec![&scope.types];
+        for types in parent_types.iter() {
+            new_parent_types.push(types)
+        }
+
+        Some(Self {
+            pos: 0,
+            scope: sub_scope,
+            parent_variables: new_parent_variables,
+            parent_types: new_parent_types,
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
-pub struct UnknownType {
-    name: String,
-    typ: Type,
-}
-
-pub struct Stack {
-    variables: HashMap<String, Option<Type>>,
+pub enum GoType {
+    Bool,
+    String,
+    Int,
+    Float,
+    Declared(Type),
+    Unknown,
 }
