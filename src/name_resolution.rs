@@ -1,7 +1,9 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
 use crate::{
-    ast::{BlockStmt, Call, Declaration, Expression, File, Ident, NameType, Statement, Type},
+    ast::{
+        BlockStmt, Call, Declaration, Expression, Field, File, FuncType, Statement, Type, TypeElem,
+    },
     utils::VecExt,
 };
 
@@ -57,9 +59,9 @@ fn find_use_idents(ast: &File) -> Scope {
                 scope.add_sub_scope(sub_scope);
             }
             Declaration::Type(decl) => {
-                for typ in &decl.specs {
-                    scope.add_type(typ.name.name.clone(), typ.typ.clone());
-                    scope.add_sub_scopes(find_scopes_in_type(&typ.typ));
+                for spec in &decl.specs {
+                    scope.add_sub_scopes(find_scopes_in_type(&spec.typ));
+                    scope.add_type(spec.name.name.clone(), spec.typ.clone());
                 }
             }
         }
@@ -189,15 +191,60 @@ fn find_scopes_in_type(typ: &Type) -> Vec<Scope> {
         }
         Type::Array(array_type) => find_scopes_in_type(&array_type.typ),
         Type::Slice(slice_type) => find_scopes_in_type(&slice_type.typ),
-        Type::Function(func_type) => todo!(),
-        Type::Struct(struct_type) => todo!(),
         Type::Channel(channel_type) => find_scopes_in_type(&channel_type.typ),
         Type::Pointer(pointer_type) => find_scopes_in_type(&pointer_type.typ),
-        Type::Interface(interface_type) => todo!(),
-        Type::Name(name_type) => vec![],
-        Type::Instantiated(instantiated_type) => todo!(),
         Type::Paren(typ) => find_scopes_in_type(&typ.typ),
+        Type::Name(_name_type) => vec![],
+        Type::Instantiated(instantiated_type) => instantiated_type
+            .arguments
+            .iter()
+            .flat_map(find_scopes_in_type)
+            .collect(),
+        Type::Struct(struct_type) => struct_type
+            .fields
+            .iter()
+            .flat_map(|field| match &field.field {
+                Field::Named(named_field) => find_scopes_in_type(&named_field.typ),
+                Field::Embedded(_embedded_field) => vec![],
+            })
+            .collect(),
+        Type::Interface(interface_type) => todo!(),
+        Type::Function(func_type) => vec![get_scope_for_function_type(func_type)],
     }
+}
+
+fn get_scope_for_function_type(func_type: &FuncType) -> Scope {
+    let mut scope = Scope::default();
+    for type_param in &func_type.typ_params {
+        let typ = GoType::TypeParam(type_param.constraint.clone());
+        for name in &type_param.name {
+            scope.add_type(name.name.clone(), typ.clone());
+        }
+    }
+
+    for param in &func_type.params {
+        scope.add_sub_scopes(find_scopes_in_type(&param.typ));
+        let typ = GoType::Declared(param.typ.clone());
+        for name in &param.identifiers {
+            scope.add_variable(name.name.clone(), typ.clone());
+        }
+    }
+
+    for param in &func_type.params {
+        let typ = GoType::Declared(param.typ.clone());
+        for name in &param.identifiers {
+            scope.add_variable(name.name.clone(), typ.clone());
+        }
+    }
+
+    for param in &func_type.result {
+        let typ = GoType::Declared(param.typ.clone());
+        for name in &param.identifiers {
+            scope.add_variable(name.name.clone(), typ.clone());
+        }
+    }
+
+    scope
 }
 
 pub fn find_idents_in_call(call: &Call) -> Vec<Scope> {
@@ -367,6 +414,7 @@ pub enum GoType {
     Float,
     Declared(Type),
     Unknown,
+    TypeParam(TypeElem),
 }
 
 impl From<Type> for GoType {
@@ -419,5 +467,61 @@ pub mod test {
         );
         assert_eq!(scope.sub_scopes[0].provided.len(), 0);
         assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_two_type_decls() {
+        let scope = get_scope_for("package main\ntype id int\ntype test string");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 2);
+        assert_matches!(
+            scope.sub_scopes[0].types.get("id"),
+            Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.name.as_str()=="int"
+        );
+
+        assert_matches!(
+            scope.sub_scopes[0].types.get("test"),
+            Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.name.as_str()=="string"
+        );
+        assert_eq!(scope.sub_scopes[0].provided.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_function_type_decl_with_two_arguments() {
+        let scope = get_scope_for("package main\ntype fun func(first, last name) int");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 1);
+        assert_matches!(
+            scope.sub_scopes[0].types.get("fun"),
+            Some(GoType::Declared(Type::Function(_)))
+        );
+
+        assert_eq!(scope.sub_scopes[0].provided.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        // the function type has 2 arguments and no names in the return type.
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 2);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_function_type_decl_with_named_result() {
+        let scope = get_scope_for("package main\ntype fun func(name) (age int)");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 1);
+        assert_matches!(
+            scope.sub_scopes[0].types.get("fun"),
+            Some(GoType::Declared(Type::Function(_)))
+        );
+
+        assert_eq!(scope.sub_scopes[0].provided.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        // the function type does not have named arguments but has one named result.
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 1);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
     }
 }
