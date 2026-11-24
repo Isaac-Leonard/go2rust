@@ -106,7 +106,15 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
         Statement::Switch(switch_stmt) => todo!(),
         Statement::Select(select_stmt) => todo!(),
         Statement::Declaration(decl_stmt) => todo!(),
-        Statement::ShortVarDecl(short_var_decl) => todo!(),
+        Statement::ShortVarDecl(short_var_decl) => {
+            for name in &short_var_decl.name {
+                // TODO, analyse the types of the values instead of defaulting to unknown.
+                scope.add_variable(name.name.clone(), GoType::Unknown);
+            }
+            for value in &short_var_decl.values {
+                scope.add_sub_scopes(find_idents_in_expression(value));
+            }
+        }
     }
 }
 
@@ -576,6 +584,30 @@ pub mod test {
         assert_matches!(
             &scope.sub_scopes[0].sub_scopes[0].provided["last"],
             GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "b"
+        );
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_function_decl_with_short_decl_variables() {
+        let scope = get_scope_for("package main\nfunc test(){\nhello:=\"world\"}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_matches!(
+            scope.sub_scopes[0].provided.get("test"),
+            Some(GoType::Function(_))
+        );
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 1);
+        assert_matches!(
+            &scope.sub_scopes[0].sub_scopes[0].provided["hello"],
+            GoType::Unknown
         );
 
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
