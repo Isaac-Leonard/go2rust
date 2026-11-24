@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{
-        BlockStmt, Call, Declaration, Expression, Field, File, FuncType, Statement, Type, TypeElem,
+        BlockStmt, Call, DeclStmt, Declaration, Expression, Field, File, FuncType, Statement, Type,
+        TypeElem,
     },
     utils::VecExt,
 };
@@ -13,37 +14,9 @@ fn find_use_idents(ast: &File) -> Scope {
     let mut scope = Scope::default();
     for decl in &ast.decl {
         match decl {
-            Declaration::Const(constants) => {
-                for constant in &constants.specs {
-                    let typ = if let Some(typ) = &constant.typ {
-                        typ.clone().into()
-                    } else {
-                        GoType::Unknown
-                    };
-
-                    for name in &constant.name {
-                        scope.provided.insert(name.name.clone(), typ.clone());
-                    }
-                }
-            }
-            Declaration::Variable(variables) => {
-                for variables in &variables.specs {
-                    let typ = if let Some(typ) = &variables.typ {
-                        scope.add_sub_scopes(find_scopes_in_type(typ));
-                        typ.clone().into()
-                    } else {
-                        GoType::Unknown
-                    };
-
-                    for name in &variables.name {
-                        scope.add_variable(name.name.clone(), GoType::Unknown);
-                    }
-
-                    for value in &variables.values {
-                        scope.add_sub_scopes(find_idents_in_expression(value));
-                    }
-                }
-            }
+            Declaration::Type(decl) => add_type_decl_to_scope(decl, &mut scope),
+            Declaration::Const(constants) => add_const_decl_to_scope(constants, &mut scope),
+            Declaration::Variable(variables) => add_variable_decl_to_scope(variables, &mut scope),
             Declaration::Function(func_decl) => {
                 scope.add_variable(
                     func_decl.name.name.clone(),
@@ -57,12 +30,6 @@ fn find_use_idents(ast: &File) -> Scope {
                     find_idents_in_block(body, &mut sub_scope)
                 }
                 scope.add_sub_scope(sub_scope);
-            }
-            Declaration::Type(decl) => {
-                for spec in &decl.specs {
-                    scope.add_sub_scopes(find_scopes_in_type(&spec.typ));
-                    scope.add_type(spec.name.name.clone(), spec.typ.clone());
-                }
             }
         }
     }
@@ -105,7 +72,11 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
         Statement::Branch(branch_stmt) => todo!(),
         Statement::Switch(switch_stmt) => todo!(),
         Statement::Select(select_stmt) => todo!(),
-        Statement::Declaration(decl_stmt) => todo!(),
+        Statement::Declaration(decl_stmt) => match decl_stmt {
+            DeclStmt::Type(decl) => add_type_decl_to_scope(decl, scope),
+            DeclStmt::Const(decl) => add_const_decl_to_scope(decl, scope),
+            DeclStmt::Variable(decl) => add_variable_decl_to_scope(decl, scope),
+        },
         Statement::ShortVarDecl(short_var_decl) => {
             for name in &short_var_decl.name {
                 // TODO, analyse the types of the values instead of defaulting to unknown.
@@ -115,6 +86,46 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
                 scope.add_sub_scopes(find_idents_in_expression(value));
             }
         }
+    }
+}
+
+fn add_variable_decl_to_scope(decl: &crate::ast::Decl<crate::ast::VarSpec>, scope: &mut Scope) {
+    for variables in &decl.specs {
+        let typ = if let Some(typ) = &variables.typ {
+            scope.add_sub_scopes(find_scopes_in_type(typ));
+            typ.clone().into()
+        } else {
+            GoType::Unknown
+        };
+
+        for name in &variables.name {
+            scope.add_variable(name.name.clone(), GoType::Unknown);
+        }
+
+        for value in &variables.values {
+            scope.add_sub_scopes(find_idents_in_expression(value));
+        }
+    }
+}
+
+fn add_const_decl_to_scope(decl: &crate::ast::Decl<crate::ast::ConstSpec>, scope: &mut Scope) {
+    for constant in &decl.specs {
+        let typ = if let Some(typ) = &constant.typ {
+            typ.clone().into()
+        } else {
+            GoType::Unknown
+        };
+
+        for name in &constant.name {
+            scope.provided.insert(name.name.clone(), typ.clone());
+        }
+    }
+}
+
+fn add_type_decl_to_scope(decl: &crate::ast::Decl<crate::ast::TypeSpec>, scope: &mut Scope) {
+    for spec in &decl.specs {
+        scope.add_sub_scopes(find_scopes_in_type(&spec.typ));
+        scope.add_type(spec.name.name.clone(), spec.typ.clone());
     }
 }
 
@@ -497,6 +508,26 @@ pub mod test {
     }
 
     #[test]
+    fn file_with_one_var_decl() {
+        let scope = get_scope_for("package main\nvar id = 10");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_matches!(&scope.sub_scopes[0].provided["id"], GoType::Unknown);
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_one_const_decl() {
+        let scope = get_scope_for("package main\nconst id = 10");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_matches!(&scope.sub_scopes[0].provided["id"], GoType::Unknown);
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
     fn file_with_function_type_decl_with_two_arguments() {
         let scope = get_scope_for("package main\ntype fun func(first, last name) int");
         assert_eq!(scope.sub_scopes.len(), 1);
@@ -592,6 +623,78 @@ pub mod test {
     #[test]
     fn file_with_function_decl_with_short_decl_variables() {
         let scope = get_scope_for("package main\nfunc test(){\nhello:=\"world\"}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_matches!(
+            scope.sub_scopes[0].provided.get("test"),
+            Some(GoType::Function(_))
+        );
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 1);
+        assert_matches!(
+            &scope.sub_scopes[0].sub_scopes[0].provided["hello"],
+            GoType::Unknown
+        );
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_function_decl_with_var_decl_variables() {
+        let scope = get_scope_for("package main\nfunc test(){\nvar hello = \"world\"}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_matches!(
+            scope.sub_scopes[0].provided.get("test"),
+            Some(GoType::Function(_))
+        );
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 1);
+        assert_matches!(
+            &scope.sub_scopes[0].sub_scopes[0].provided["hello"],
+            GoType::Unknown
+        );
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_function_decl_with_type_decl() {
+        let scope = get_scope_for("package main\nfunc test(){\ntype name string}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].provided.len(), 1);
+        assert_matches!(
+            scope.sub_scopes[0].provided.get("test"),
+            Some(GoType::Function(_))
+        );
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 1);
+        assert_matches!(
+            &scope.sub_scopes[0].sub_scopes[0].types["name"],
+            GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "string"
+        );
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].provided.len(), 0);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_function_decl_with_const_decl() {
+        let scope = get_scope_for("package main\nfunc test(){\nconst hello = \"world\"}");
         assert_eq!(scope.sub_scopes.len(), 1);
         assert_eq!(scope.sub_scopes[0].types.len(), 0);
         assert_eq!(scope.sub_scopes[0].provided.len(), 1);
