@@ -634,6 +634,8 @@ pub enum GoType {
     String,
     Int,
     Float,
+    Imag,
+    Char,
     Function(FuncType),
     Declared(Type),
     Unknown,
