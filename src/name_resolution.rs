@@ -459,7 +459,7 @@ pub struct Scope {
     //Named generics, or declared types in this scope
     pub types: HashMap<String, GoType>,
     /// function arguments or variables declared in this scope
-    variables: HashMap<String, GoType>,
+    pub variables: HashMap<String, GoType>,
     /// Functions declared in this scope with their own arguments and local variables
     sub_scopes: Vec<Scope>,
 }
@@ -510,11 +510,19 @@ impl Scope {
                 "Append", "Copy", "Clear", "Close", "complex", "real", "imag", "delete", "len",
                 "cap", "make", "min", "max", "new", "panic", "recover", "print",
                 "println", //functions
-                "true", "false", "iota", // Constants:
-                "nil",  // Zero value:
+                "nil",     // Zero value:
             ]
             .into_iter()
             .map(|s| (s.to_string(), GoType::Unknown))
+            .chain(
+                [
+                    // Constants:
+                    ("true", GoType::Bool),
+                    ("false", GoType::Bool),
+                    ("iota", GoType::Int),
+                ]
+                .map(|(name, typ)| (name.to_string(), typ)),
+            )
             .collect(),
             sub_scopes: vec![],
         }
@@ -543,16 +551,32 @@ impl Scope {
     pub fn add_sub_scopes(&mut self, sub_scopes: Vec<Scope>) {
         self.sub_scopes.extend(sub_scopes);
     }
+
+    pub fn get_variable(&mut self, name: &str) -> Option<&mut GoType> {
+        self.variables.get_mut(name)
+    }
 }
 
 pub struct Context<'a> {
-    scope: &'a mut Scope,
+    pub scope: &'a mut Scope,
     pos: usize,
     parent_variables: Vec<&'a HashMap<String, GoType>>,
     parent_types: Vec<&'a HashMap<String, GoType>>,
 }
 
 impl<'a> Context<'a> {
+    pub fn get_variable(&self, name: &str) -> Option<&GoType> {
+        if let Some(variable) = self.scope.variables.get(name) {
+            return Some(variable);
+        };
+        for parent in &self.parent_variables {
+            if let Some(variable) = parent.get(name) {
+                return Some(variable);
+            }
+        }
+        None
+    }
+
     pub fn new(scope: &'a mut Scope) -> Self {
         Self {
             scope,
@@ -614,6 +638,23 @@ pub enum GoType {
     Declared(Type),
     Unknown,
     TypeParam(TypeElem),
+    Type(Type),
+}
+
+impl GoType {
+    /// Returns `true` if the go type is [`Unknown`].
+    ///
+    /// [`Unknown`]: GoType::Unknown
+    #[must_use]
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, Self::Unknown)
+    }
+}
+
+impl Default for GoType {
+    fn default() -> Self {
+        Self::Unknown
+    }
 }
 
 impl From<Type> for GoType {
