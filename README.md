@@ -3,6 +3,9 @@ A tool to help convert Golang code to rust.
 ## What it can do
 ## What it cannot do
 ## Road map
+- Infer types for constant and static variables.
+- Provide an equivalent to the Go standard library.
+- Allow specifying custom hooks through dynamic library loading.
 ## AI Usage
 For my fork of the Gosyn crate that this project relies on, AI was used by the project author to review a pull request I made and I did use the LLM generated feedback along with the AI generated test cases to fix issues with my original changes.
 
