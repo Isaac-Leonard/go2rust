@@ -100,12 +100,25 @@ pub fn infer_type_for_operation(op: &Operation, context: &Context) -> GoType {
             let left_type = infer_type_for_expression(&op.x, context);
             let right_type = infer_type_for_expression(op.y.as_ref().unwrap(), context);
             match (left_type, right_type) {
-                (GoType::Int, GoType::Int)
-                | (GoType::Int, GoType::Unknown)
-                | (GoType::Unknown, GoType::Int) => GoType::Int,
-                (GoType::String, GoType::String)
-                | (GoType::String, GoType::Unknown)
-                | (GoType::Unknown, GoType::String) => GoType::String,
+                (GoType::Unknown, typ) | (typ, GoType::Unknown) => typ,
+                (GoType::Int, GoType::Int) => GoType::Int,
+                (GoType::String, GoType::String) => GoType::String,
+                (GoType::Float, GoType::Float) => GoType::Float,
+                (GoType::Imag, GoType::Imag) => GoType::Imag,
+                _ => GoType::Unknown,
+            }
+        }
+        Operator::Sub => {
+            let x_type = infer_type_for_expression(&op.x, context);
+            let Some(y) = &op.y else {
+                return x_type;
+            };
+            let y_type = infer_type_for_expression(y, context);
+            match (x_type, y_type) {
+                (GoType::Unknown, typ) | (typ, GoType::Unknown) => typ,
+                (GoType::Int, GoType::Int) => GoType::Int,
+                (GoType::Float, GoType::Float) => GoType::Float,
+                (GoType::Imag, GoType::Imag) => GoType::Imag,
                 _ => GoType::Unknown,
             }
         }
@@ -184,6 +197,14 @@ mod test {
         let mut context = Context::new(&mut scope);
         let file_context = context.next_scope().unwrap();
         assert_matches!(file_context.get_variable("pi"), Some(GoType::Float));
+    }
+
+    #[test]
+    fn var_with_imaginary_value_is_infered_as_imaginary() {
+        let mut scope = infer_types_for("package main\nvar complex = 5i");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("complex"), Some(GoType::Imag));
     }
 
     #[test]
@@ -301,26 +322,114 @@ mod test {
     }
 
     #[test]
-    fn var_with_value_integer_addition_operation_is_infered_as_bool() {
-        let mut scope = infer_types_for("package main\nvar str= 1 + 2");
+    fn var_with_value_integer_addition_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= 1 + 2");
         let mut context = Context::new(&mut scope);
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("str"), Some(GoType::Int));
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
     }
 
     #[test]
-    fn var_with_value_int_and_unknown_addition_operation_is_infered_as_bool() {
-        let mut scope = infer_types_for("package main\nvar str= 2 + unknown");
+    fn var_with_value_int_and_unknown_addition_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= 2 + unknown");
         let mut context = Context::new(&mut scope);
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("str"), Some(GoType::Int));
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
     }
 
     #[test]
-    fn var_with_value_unknown_and_integer_addition_operation_is_infered_as_bool() {
-        let mut scope = infer_types_for("package main\nvar str= unknown + 3");
+    fn var_with_value_unknown_and_integer_addition_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= unknown + 3");
         let mut context = Context::new(&mut scope);
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("str"), Some(GoType::Int));
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+    }
+
+    #[test]
+    fn var_with_value_float_addition_operation_is_infered_as_float() {
+        let mut scope = infer_types_for("package main\nvar float= 1.0 + 2.0");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+    }
+
+    #[test]
+    fn var_with_value_float_and_unknown_addition_operation_is_infered_as_float() {
+        let mut scope = infer_types_for("package main\nvar float= 2.0 + unknown");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+    }
+
+    #[test]
+    fn var_with_value_unknown_and_float_addition_operation_is_infered_as_float() {
+        let mut scope = infer_types_for("package main\nvar float= unknown + 3.0");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+    }
+
+    #[test]
+    fn var_with_value_integer_subtraction_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= 1 - 2");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+    }
+
+    #[test]
+    fn var_with_value_int_and_unknown_subtraction_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= 2 - unknown");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+    }
+
+    #[test]
+    fn var_with_value_unknown_and_integer_subtraction_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= unknown - 3");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+    }
+
+    #[test]
+    fn var_with_value_float_subtraction_operation_is_infered_as_float() {
+        let mut scope = infer_types_for("package main\nvar float= 1.0 - 2.0");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+    }
+
+    #[test]
+    fn var_with_value_float_and_unknown_subtraction_operation_is_infered_as_float() {
+        let mut scope = infer_types_for("package main\nvar float= 2.0 - unknown");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+    }
+
+    #[test]
+    fn var_with_value_unknown_and_float_subtraction_operation_is_infered_as_float() {
+        let mut scope = infer_types_for("package main\nvar float= unknown - 3.0");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+    }
+
+    #[test]
+    fn var_with_value_negative_float_operation_is_infered_as_float() {
+        let mut scope = infer_types_for("package main\nvar float= -3.0");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+    }
+
+    #[test]
+    fn var_with_value_negative_int_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= -3");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
     }
 }
