@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use gosyn::token::Operator;
+
 use crate::{
     ast::{
         BlockStmt, Call, DeclStmt, Declaration, Expression, Field, File, FuncType, Statement, Type,
@@ -72,7 +74,38 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
             }
             scope.add_sub_scope(sub_scope);
         }
-        Statement::Range(range_stmt) => todo!(),
+        Statement::Range(range_stmt) => {
+            scope.add_sub_scopes(find_idents_in_expression(&range_stmt.expr));
+            let scope = scope.add_sub_scope(Scope::default());
+            if range_stmt.op == Some(Operator::Define) {
+                if let Some(key) = &range_stmt.key {
+                    if let Expression::Ident(key) = key {
+                        scope.add_variable(key.name.clone(), GoType::Unknown);
+                    } else {
+                        panic!(
+                            "Got non-identifier expression in range statement with short variable eclaration, got {key:?}"
+                        );
+                    }
+                }
+                if let Some(value) = &range_stmt.value {
+                    if let Expression::Ident(value) = value {
+                        scope.add_variable(value.name.clone(), GoType::Unknown);
+                    } else {
+                        panic!(
+                            "Got non-identifier expression in range statement with short variable eclaration, got {value:?}"
+                        );
+                    }
+                }
+            } else {
+                if let Some(key) = &range_stmt.key {
+                    find_idents_in_expression(key);
+                }
+                if let Some(value) = &range_stmt.value {
+                    find_idents_in_expression(value);
+                }
+            }
+            find_idents_in_block(&range_stmt.body, scope);
+        }
         Statement::Label(labeled_stmt) => {
             // a labeled statement does not need a new scope unless it's an if or for statement or something in which case a new scope will be made for that statement specificly.
             find_idents_in_statement(&labeled_stmt.stmt, scope)
@@ -925,6 +958,36 @@ pub mod test {
 
         assert_eq!(
             scope.sub_scopes[0].sub_scopes[0].sub_scopes[2]
+                .sub_scopes
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn file_with_function_with_range_statement() {
+        let scope = get_scope_for("package main\nfunc test(){\nfor i := range 5 {}}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .variables
+                .len(),
+            1
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
                 .sub_scopes
                 .len(),
             0
