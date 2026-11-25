@@ -25,9 +25,16 @@ fn find_use_idents(ast: &File) -> Scope {
                     GoType::Function(func_decl.typ.clone()),
                 );
                 let mut sub_scope = get_scope_for_function_type(&func_decl.typ);
-                // For if this function is a method
-                // TODO Check if recv can actually have more then one value
-
+                if let Some(recv) = &func_decl.recv {
+                    // There can only be one reciever but just to be safe we do this properly
+                    for param in recv {
+                        scope.add_sub_scopes(find_scopes_in_type(&param.typ));
+                        let typ = GoType::Declared(param.typ.clone());
+                        for name in &param.identifiers {
+                            sub_scope.add_variable(name.name.clone(), typ.clone());
+                        }
+                    }
+                }
                 if let Some(body) = &func_decl.body {
                     find_idents_in_block(body, &mut sub_scope)
                 }
@@ -730,6 +737,25 @@ pub mod test {
             GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "b"
         );
 
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_function_decl_with_named_receiver() {
+        let scope = get_scope_for("package main\nfunc(o *obj) test (){}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
+        assert_matches!(
+            scope.sub_scopes[0].variables.get("test"),
+            Some(GoType::Function(_))
+        );
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        // One named receiver
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 1);
         assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
     }
 
