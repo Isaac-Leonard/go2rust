@@ -4,8 +4,8 @@ use gosyn::token::Operator;
 
 use crate::{
     ast::{
-        BlockStmt, Call, DeclStmt, Declaration, Expression, Field, File, FuncType, Statement, Type,
-        TypeElem,
+        BlockStmt, Call, DeclStmt, Declaration, Expression, Field, File, FuncType, Statement,
+        SwitchStmt, Type, TypeElem,
     },
     utils::VecExt,
 };
@@ -133,7 +133,45 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
                 scope.add_sub_scopes(find_idents_in_expression(ret))
             }
         }
-        Statement::Switch(switch_stmt) => todo!(),
+        Statement::Switch(SwitchStmt::Expr(switch)) => {
+            let scope = scope.add_sub_scope(Scope::default());
+            if let Some(init) = switch.init.as_deref() {
+                find_idents_in_statement(init, scope);
+            }
+            if let Some(tag) = &switch.tag {
+                scope.add_sub_scopes(find_idents_in_expression(tag));
+            }
+            for clause in &switch.block.body {
+                for expr in &clause.list {
+                    scope.add_sub_scopes(find_idents_in_expression(expr));
+                }
+                let mut clause_scope = Scope::default();
+                for stmt in &clause.body {
+                    find_idents_in_statement(stmt, &mut clause_scope)
+                }
+                scope.add_sub_scope(clause_scope);
+            }
+        }
+        Statement::Switch(SwitchStmt::Type(switch)) => {
+            let scope = scope.add_sub_scope(Scope::default());
+            if let Some(init) = switch.init.as_deref() {
+                find_idents_in_statement(init, scope);
+            }
+            if let Some(tag) = switch.tag.as_deref() {
+                // TODO This should probably be analysed properly to put a possible tag variable into each clause scope as outlined by the Go Language specification however this is good enough for now.
+                find_idents_in_statement(tag, scope);
+            }
+            for clause in &switch.block.body {
+                for typ in &clause.list {
+                    scope.add_sub_scopes(find_scopes_in_type(typ));
+                }
+                let mut clause_scope = Scope::default();
+                for stmt in &clause.body {
+                    find_idents_in_statement(stmt, &mut clause_scope)
+                }
+                scope.add_sub_scope(clause_scope);
+            }
+        }
         Statement::Select(select_stmt) => todo!(),
         Statement::Declaration(decl_stmt) => match decl_stmt {
             DeclStmt::Type(decl) => add_type_decl_to_scope(decl, scope),
@@ -1109,5 +1147,59 @@ pub mod test {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn file_with_function_with_expression_switch_statement() {
+        let scope = get_scope_for(
+            "package main\nfunc test(){\nswitch x:=true;x{\ncase true:\ncase false:\n}}",
+        );
+        assert_eq!(scope.sub_scopes.len(), 1);
+        let file_scope = &scope.sub_scopes[0];
+        assert_eq!(file_scope.sub_scopes.len(), 1);
+        let func_scope = &file_scope.sub_scopes[0];
+        assert_eq!(func_scope.types.len(), 0);
+        assert_eq!(func_scope.variables.len(), 0);
+
+        assert_eq!(func_scope.sub_scopes.len(), 1);
+        let switch_scope = &func_scope.sub_scopes[0];
+        assert_eq!(switch_scope.types.len(), 0);
+        assert_eq!(switch_scope.variables.len(), 1);
+        assert_eq!(switch_scope.sub_scopes.len(), 2);
+
+        assert_eq!(switch_scope.sub_scopes[0].types.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[0].variables.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[0].sub_scopes.len(), 0);
+
+        assert_eq!(switch_scope.sub_scopes[1].types.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[1].variables.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[1].sub_scopes.len(), 0);
+    }
+
+    #[test]
+    fn file_with_function_with_type_switch_statement() {
+        let scope = get_scope_for(
+            "package main\nfunc test(){\nswitch x:=thing();v:=x.(type){\ncase string:\ncase int:\n}}",
+        );
+        assert_eq!(scope.sub_scopes.len(), 1);
+        let file_scope = &scope.sub_scopes[0];
+        assert_eq!(file_scope.sub_scopes.len(), 1);
+        let func_scope = &file_scope.sub_scopes[0];
+        assert_eq!(func_scope.types.len(), 0);
+        assert_eq!(func_scope.variables.len(), 0);
+
+        assert_eq!(func_scope.sub_scopes.len(), 1);
+        let switch_scope = &func_scope.sub_scopes[0];
+        assert_eq!(switch_scope.types.len(), 0);
+        assert_eq!(switch_scope.variables.len(), 2);
+        assert_eq!(switch_scope.sub_scopes.len(), 2);
+
+        assert_eq!(switch_scope.sub_scopes[0].types.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[0].variables.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[0].sub_scopes.len(), 0);
+
+        assert_eq!(switch_scope.sub_scopes[1].types.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[1].variables.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[1].sub_scopes.len(), 0);
     }
 }
