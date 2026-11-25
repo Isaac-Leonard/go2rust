@@ -4,8 +4,8 @@ use gosyn::token::Operator;
 
 use crate::{
     ast::{
-        BlockStmt, Call, DeclStmt, Declaration, Expression, Field, File, FuncType, Statement,
-        SwitchStmt, Type, TypeElem,
+        BlockStmt, Call, DeclStmt, Declaration, Expression, Field, File, FuncType, InterfaceElem,
+        Statement, SwitchStmt, Type, TypeElem, TypeTerm,
     },
     utils::VecExt,
 };
@@ -359,15 +359,38 @@ fn find_scopes_in_type(typ: &Type) -> Vec<Scope> {
                 Field::Embedded(_embedded_field) => vec![],
             })
             .collect(),
-        Type::Interface(interface_type) => todo!(),
+        Type::Interface(interface_type) => interface_type
+            .elements
+            .iter()
+            .flat_map(|element| match element {
+                InterfaceElem::Method(method_elem) => {
+                    vec![get_scope_for_function_type(&method_elem.typ)]
+                }
+                InterfaceElem::Type(type_elem) => find_scopes_in_type_elem(type_elem),
+            })
+            .collect(),
         Type::Function(func_type) => vec![get_scope_for_function_type(func_type)],
     }
+}
+
+fn find_scopes_in_type_elem(type_elem: &TypeElem) -> Vec<Scope> {
+    type_elem
+        .types
+        .iter()
+        .flat_map(|term| match term {
+            TypeTerm::Type(typ) => find_scopes_in_type(typ),
+            TypeTerm::UnderLyingType(under_lying_type) => {
+                find_scopes_in_type(&under_lying_type.typ)
+            }
+        })
+        .collect()
 }
 
 fn get_scope_for_function_type(func_type: &FuncType) -> Scope {
     let mut scope = Scope::default();
     for type_param in &func_type.typ_params {
         let typ = GoType::TypeParam(type_param.constraint.clone());
+        scope.add_sub_scopes(find_scopes_in_type_elem(&type_param.constraint));
         for name in &type_param.name {
             scope.add_type(name.name.clone(), typ.clone());
         }
