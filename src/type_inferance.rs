@@ -130,8 +130,7 @@ pub fn infer_type_for_operation(op: &Operation, context: &Context) -> GoType {
         | Operator::Xor => GoType::Int,
         Operator::Star => todo!(),
         Operator::Quo => todo!(),
-        Operator::Rem => todo!(),
-        Operator::AndNot => todo!(),
+        Operator::Rem => GoType::Int,
         Operator::Arrow => todo!(),
         other => {
             unreachable!["Found unexpected operator type during type inference, got {other:?}"]
@@ -489,6 +488,14 @@ mod test {
     #[test]
     fn var_with_value_lhs_operation_is_infered_as_int() {
         let mut scope = infer_types_for("package main\nvar int= a<<b");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+    }
+
+    #[test]
+    fn var_with_value_rem_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= a%b");
         let mut context = Context::new(&mut scope);
         let file_context = context.next_scope().unwrap();
         assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
