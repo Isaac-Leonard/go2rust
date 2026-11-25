@@ -10,7 +10,7 @@ use crate::{
     utils::VecExt,
 };
 
-fn find_use_idents(ast: &File) -> Scope {
+pub fn find_use_idents(ast: &File) -> Scope {
     // TODO Have this be an over arching scope for all files and have proper package scopes.
     let mut top_scope = Scope::new_universe();
     let mut scope = Scope::default();

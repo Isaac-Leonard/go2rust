@@ -15,7 +15,7 @@ use hooks::{
         upper_case_string_types,
     },
 };
-use name_resolution::{Context, Scope};
+use name_resolution::{Context, Scope, find_use_idents};
 
 fn main() {
     let cli = Cli::parse();
@@ -26,10 +26,10 @@ fn main() {
             return;
         }
     };
-    let mut scope = Scope::new_universe();
-    let mut context = Context::new(&mut scope);
 
     let mut ast = ast.into();
+    let mut scope = find_use_idents(&ast);
+    let mut context = Context::new(&mut scope);
     let hooks = pre::Hooks {
         types: vec![&upper_case_string_types],
         func_types: vec![&return_slice_to_vec],
