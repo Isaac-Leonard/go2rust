@@ -122,7 +122,20 @@ pub fn infer_type_for_operation(op: &Operation, context: &Context) -> GoType {
                 _ => GoType::Unknown,
             }
         }
-        _ => unimplemented![],
+        Operator::AndNot
+        | Operator::Or
+        | Operator::And
+        | Operator::Shl
+        | Operator::Shr
+        | Operator::Xor => GoType::Int,
+        Operator::Star => todo!(),
+        Operator::Quo => todo!(),
+        Operator::Rem => todo!(),
+        Operator::AndNot => todo!(),
+        Operator::Arrow => todo!(),
+        other => {
+            unreachable!["Found unexpected operator type during type inference, got {other:?}"]
+        }
     }
 }
 
@@ -428,6 +441,54 @@ mod test {
     #[test]
     fn var_with_value_negative_int_operation_is_infered_as_int() {
         let mut scope = infer_types_for("package main\nvar int= -3");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+    }
+
+    #[test]
+    fn var_with_value_notand_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= a&^b");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+    }
+
+    #[test]
+    fn var_with_value_and_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= a&b");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+    }
+
+    #[test]
+    fn var_with_value_xor_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= a^b");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+    }
+
+    #[test]
+    fn var_with_value_or_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= a|b");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+    }
+
+    #[test]
+    fn var_with_value_rhs_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= a>>b");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+    }
+
+    #[test]
+    fn var_with_value_lhs_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar int= a<<b");
         let mut context = Context::new(&mut scope);
         let file_context = context.next_scope().unwrap();
         assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
