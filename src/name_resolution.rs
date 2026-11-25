@@ -241,8 +241,18 @@ fn find_idents_in_expression(exp: &Expression) -> Vec<Scope> {
             }
             idents
         }
-        Expression::FuncLit(func_lit) => todo!(),
-        Expression::Ellipsis(ellipsis) => find_idents_in_expression(&ellipsis.elt),
+        Expression::FuncLit(func_lit) => {
+            let mut scope = get_scope_for_function_type(&func_lit.typ);
+            find_idents_in_block(&func_lit.body, &mut scope);
+            vec![scope]
+        }
+        Expression::Ellipsis(ellipsis) => {
+            if let Some(elt) = ellipsis.elt.as_deref() {
+                find_idents_in_expression(elt)
+            } else {
+                vec![]
+            }
+        }
         Expression::Selector(selector) => {
             let idents = find_idents_in_expression(&selector.x);
             // idents.push(Referenced(selector.sel.name.clone()));
@@ -1055,6 +1065,42 @@ pub mod test {
                 .variables
                 .len(),
             1
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .sub_scopes
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn file_with_function_with_function_literal() {
+        let scope =
+            get_scope_for("package main\nfunc test(){\nfun := func(name string) int{return name}}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .variables
+                .len(),
+            1
+        );
+
+        assert_matches!(
+            &scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].variables["name"],
+            GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "string"
         );
 
         assert_eq!(
