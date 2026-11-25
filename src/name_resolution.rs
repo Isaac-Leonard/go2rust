@@ -203,8 +203,6 @@ fn find_idents_in_block(block: &BlockStmt, scope: &mut Scope) {
 
 fn find_idents_in_expression(exp: &Expression) -> Vec<Scope> {
     match exp {
-        Expression::Ident(ident) => vec![],
-        Expression::BasicLit(lit) => vec![],
         Expression::Index(index) => {
             let left = find_idents_in_expression(&index.left);
             let right = find_idents_in_expression(&index.index);
@@ -244,7 +242,7 @@ fn find_idents_in_expression(exp: &Expression) -> Vec<Scope> {
             idents
         }
         Expression::FuncLit(func_lit) => todo!(),
-        Expression::Ellipsis(ellipsis) => todo!(),
+        Expression::Ellipsis(ellipsis) => find_idents_in_expression(&ellipsis.elt),
         Expression::Selector(selector) => {
             let idents = find_idents_in_expression(&selector.x);
             // idents.push(Referenced(selector.sel.name.clone()));
@@ -264,6 +262,7 @@ fn find_idents_in_expression(exp: &Expression) -> Vec<Scope> {
         }
         Expression::CompositeLit(composite_lit) => todo!(),
         Expression::Type(typ) => find_scopes_in_type(typ),
+        Expression::Ident(_) | Expression::BasicLit(_) => vec![],
     }
 }
 
