@@ -611,11 +611,22 @@ mod test {
 
     #[test]
     fn var_with_value_address_to_int_operation_is_infered_as_pointer_to_int() {
-        let mut scope = infer_types_for("package main\nvar float= &3");
+        let mut scope = infer_types_for("package main\nvar int= &3");
         let mut context = Context::new(&mut scope);
         let file_context = context.next_scope().unwrap();
         assert_matches!(
-            file_context.get_variable("float"),
+            file_context.get_variable("int"),
+            Some(GoType::Pointer(typ)) if typ.is_int()
+        );
+    }
+
+    #[test]
+    fn var_with_value_dereference_for_pointer_int_operation_is_infered_as_int() {
+        let mut scope = infer_types_for("package main\nvar intptr= &3\nvar int = *intptr");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(
+            file_context.get_variable("int"),
             Some(GoType::Pointer(typ)) if typ.is_int()
         );
     }
