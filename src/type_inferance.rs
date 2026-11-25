@@ -122,12 +122,18 @@ pub fn infer_type_for_operation(op: &Operation, context: &Context) -> GoType {
                 _ => GoType::Unknown,
             }
         }
-        Operator::AndNot
-        | Operator::Or
-        | Operator::And
-        | Operator::Shl
-        | Operator::Shr
-        | Operator::Xor => GoType::Int,
+        Operator::AndNot | Operator::Or | Operator::Shl | Operator::Shr | Operator::Xor => {
+            GoType::Int
+        }
+        Operator::And => {
+            if op.y.is_some() {
+                // Bit and
+                GoType::Int
+            } else {
+                // Address
+                GoType::Pointer(Box::new(infer_type_for_expression(&op.x, context)))
+            }
+        }
         Operator::Star | Operator::Quo => {
             let left_type = infer_type_for_expression(&op.x, context);
             let right_type = infer_type_for_expression(op.y.as_ref().unwrap(), context);
@@ -601,5 +607,16 @@ mod test {
         let mut context = Context::new(&mut scope);
         let file_context = context.next_scope().unwrap();
         assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+    }
+
+    #[test]
+    fn var_with_value_address_to_int_operation_is_infered_as_pointer_to_int() {
+        let mut scope = infer_types_for("package main\nvar float= &3");
+        let mut context = Context::new(&mut scope);
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(
+            file_context.get_variable("float"),
+            Some(GoType::Pointer(typ)) if typ.is_int()
+        );
     }
 }

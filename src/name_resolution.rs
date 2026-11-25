@@ -628,6 +628,8 @@ impl<'a> std::ops::Deref for Context<'a> {
     }
 }
 
+// TODO Figure out what we want this to actually represent
+// And furthermore how we want to represent types that are declared and infered.
 #[derive(Clone, Debug)]
 pub enum GoType {
     Bool,
@@ -641,6 +643,7 @@ pub enum GoType {
     Unknown,
     TypeParam(TypeElem),
     Type(Type),
+    Pointer(Box<GoType>),
 }
 
 impl GoType {
@@ -650,6 +653,14 @@ impl GoType {
     #[must_use]
     pub fn is_unknown(&self) -> bool {
         matches!(self, Self::Unknown)
+    }
+
+    /// Returns `true` if the go type is [`Int`].
+    ///
+    /// [`Int`]: GoType::Int
+    #[must_use]
+    pub fn is_int(&self) -> bool {
+        matches!(self, Self::Int)
     }
 }
 
