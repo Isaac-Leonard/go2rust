@@ -4,8 +4,8 @@ use gosyn::token::Operator;
 
 use crate::{
     ast::{
-        BlockStmt, Call, DeclStmt, Declaration, Expression, Field, File, FuncType, InterfaceElem,
-        Statement, SwitchStmt, Type, TypeElem, TypeTerm,
+        BlockStmt, Call, DeclStmt, Declaration, Element, Expression, Field, File, FuncType,
+        InterfaceElem, KeyedElement, LiteralValue, Statement, SwitchStmt, Type, TypeElem, TypeTerm,
     },
     utils::VecExt,
 };
@@ -327,10 +327,34 @@ fn find_idents_in_expression(exp: &Expression) -> Vec<Scope> {
                 left
             }
         }
-        Expression::CompositeLit(composite_lit) => todo!(),
+        Expression::CompositeLit(composite_lit) => {
+            let type_scopes = find_idents_in_expression(&composite_lit.typ);
+            let val_scopes = find_scopes_in_literal_value(&composite_lit.val);
+            type_scopes.concat(val_scopes)
+        }
         Expression::Type(typ) => find_scopes_in_type(typ),
         Expression::Ident(_) | Expression::BasicLit(_) => vec![],
     }
+}
+
+fn find_scopes_in_literal_value(val: &LiteralValue) -> Vec<Scope> {
+    val.values
+        .iter()
+        .flat_map(|KeyedElement { key, val }| {
+            let key_scopes = key
+                .as_ref()
+                .map(|key| match key {
+                    Element::Expr(expression) => find_idents_in_expression(expression),
+                    Element::LitValue(literal_value) => find_scopes_in_literal_value(literal_value),
+                })
+                .unwrap_or_default();
+            let val_scopes = match val {
+                Element::Expr(expression) => find_idents_in_expression(expression),
+                Element::LitValue(literal_value) => find_scopes_in_literal_value(literal_value),
+            };
+            key_scopes.concat(val_scopes)
+        })
+        .collect()
 }
 
 fn find_scopes_in_type(typ: &Type) -> Vec<Scope> {
