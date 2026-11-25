@@ -59,7 +59,19 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
                 find_idents_in_statement(else_stmt, scope);
             }
         }
-        Statement::For(for_stmt) => todo!(),
+        Statement::For(for_stmt) => {
+            let scope = scope.add_sub_scope(Scope::default());
+            if let Some(init) = for_stmt.init.as_deref() {
+                find_idents_in_statement(init, scope)
+            }
+            if let Some(cond) = for_stmt.cond.as_deref() {
+                find_idents_in_statement(cond, scope)
+            }
+            if let Some(post) = for_stmt.post.as_deref() {
+                find_idents_in_statement(post, scope)
+            }
+            find_idents_in_block(&for_stmt.body, scope);
+        }
         Statement::Send(send_stmt) => {
             scope.add_sub_scopes(find_idents_in_expression(&send_stmt.value))
         }
@@ -967,6 +979,66 @@ pub mod test {
     #[test]
     fn file_with_function_with_range_statement() {
         let scope = get_scope_for("package main\nfunc test(){\nfor i := range 5 {}}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .variables
+                .len(),
+            1
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .sub_scopes
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn file_with_function_with_empty_for_statement() {
+        let scope = get_scope_for("package main\nfunc test(){\nfor {}}");
+        assert_eq!(scope.sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
+
+        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+                .sub_scopes
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn file_with_function_with_full_for_statement() {
+        let scope = get_scope_for("package main\nfunc test(){\nfor i := 0; i<10; i++ {}}");
         assert_eq!(scope.sub_scopes.len(), 1);
 
         assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
