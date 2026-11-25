@@ -179,7 +179,19 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
                 scope.add_sub_scope(clause_scope);
             }
         }
-        Statement::Select(select_stmt) => todo!(),
+        Statement::Select(select_stmt) => {
+            for clause in &select_stmt.body.body {
+                let scope = scope.add_sub_scope(Scope::default());
+                // TODO Look if we need to analyse the comm expression to create sub scopes in the main scope or the clause scope.
+                // This should be good for now and is how I believe it should behave.
+                if let Some(comm) = clause.comm.as_deref() {
+                    find_idents_in_statement(comm, scope);
+                }
+                for stmt in &clause.body {
+                    find_idents_in_statement(stmt, scope);
+                }
+            }
+        }
         Statement::Declaration(decl_stmt) => match decl_stmt {
             DeclStmt::Type(decl) => add_type_decl_to_scope(decl, scope),
             DeclStmt::Const(decl) => add_const_decl_to_scope(decl, scope),
