@@ -6,6 +6,8 @@ pub mod transform;
 pub mod type_inferance;
 pub mod utils;
 
+use std::{cell::RefCell, rc::Rc};
+
 use clap::Parser;
 use cli::Cli;
 use hooks::{
@@ -15,7 +17,7 @@ use hooks::{
         upper_case_string_types,
     },
 };
-use name_resolution::{Context, Scope, find_use_idents};
+use name_resolution::{Context, find_use_idents};
 
 fn main() {
     let cli = Cli::parse();
@@ -28,8 +30,8 @@ fn main() {
     };
 
     let mut ast = ast.into();
-    let mut scope = find_use_idents(&ast);
-    let mut context = Context::new(&mut scope);
+    let scope = Rc::new(RefCell::new(find_use_idents(&ast)));
+    let mut context = Context::new(scope.clone());
     let hooks = pre::Hooks {
         types: vec![&upper_case_string_types],
         func_types: vec![&return_slice_to_vec],

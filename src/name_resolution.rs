@@ -1,4 +1,8 @@
-use std::collections::HashMap;
+use std::{
+    cell::{Ref, RefCell, RefMut},
+    collections::HashMap,
+    rc::Rc,
+};
 
 use gosyn::token::Operator;
 
@@ -20,7 +24,7 @@ pub fn find_use_idents(ast: &File) -> Scope {
             Declaration::Const(constants) => add_const_decl_to_scope(constants, &mut scope),
             Declaration::Variable(variables) => add_variable_decl_to_scope(variables, &mut scope),
             Declaration::Function(func_decl) => {
-                scope.add_variable(
+                scope.set_variable(
                     func_decl.name.name.clone(),
                     GoType::Function(func_decl.typ.clone()),
                 );
@@ -31,7 +35,7 @@ pub fn find_use_idents(ast: &File) -> Scope {
                         scope.add_sub_scopes(find_scopes_in_type(&param.typ));
                         let typ = GoType::Declared(param.typ.clone());
                         for name in &param.identifiers {
-                            sub_scope.add_variable(name.name.clone(), typ.clone());
+                            sub_scope.set_variable(name.name.clone(), typ.clone());
                         }
                     }
                 }
@@ -53,7 +57,7 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
             let scope = if let Some(init) = &if_stmt.init {
                 let mut init_scope = Scope::default();
                 find_idents_in_statement(init, &mut init_scope);
-                scope.add_sub_scope(init_scope)
+                &mut *scope.add_sub_scope(init_scope)
             } else {
                 scope
             };
@@ -67,17 +71,17 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
             }
         }
         Statement::For(for_stmt) => {
-            let scope = scope.add_sub_scope(Scope::default());
+            let mut scope = scope.add_sub_scope(Scope::default());
             if let Some(init) = for_stmt.init.as_deref() {
-                find_idents_in_statement(init, scope)
+                find_idents_in_statement(init, &mut *scope)
             }
             if let Some(cond) = for_stmt.cond.as_deref() {
-                find_idents_in_statement(cond, scope)
+                find_idents_in_statement(cond, &mut *scope)
             }
             if let Some(post) = for_stmt.post.as_deref() {
-                find_idents_in_statement(post, scope)
+                find_idents_in_statement(post, &mut *scope)
             }
-            find_idents_in_block(&for_stmt.body, scope);
+            find_idents_in_block(&for_stmt.body, &mut *scope);
         }
         Statement::Send(send_stmt) => {
             scope.add_sub_scopes(find_idents_in_expression(&send_stmt.value))
@@ -95,11 +99,11 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
         }
         Statement::Range(range_stmt) => {
             scope.add_sub_scopes(find_idents_in_expression(&range_stmt.expr));
-            let scope = scope.add_sub_scope(Scope::default());
+            let mut scope = scope.add_sub_scope(Scope::default());
             if range_stmt.op == Some(Operator::Define) {
                 if let Some(key) = &range_stmt.key {
                     if let Expression::Ident(key) = key {
-                        scope.add_variable(key.name.clone(), GoType::Unknown);
+                        scope.set_variable(key.name.clone(), GoType::Unknown);
                     } else {
                         panic!(
                             "Got non-identifier expression in range statement with short variable eclaration, got {key:?}"
@@ -108,7 +112,7 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
                 }
                 if let Some(value) = &range_stmt.value {
                     if let Expression::Ident(value) = value {
-                        scope.add_variable(value.name.clone(), GoType::Unknown);
+                        scope.set_variable(value.name.clone(), GoType::Unknown);
                     } else {
                         panic!(
                             "Got non-identifier expression in range statement with short variable eclaration, got {value:?}"
@@ -123,7 +127,7 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
                     find_idents_in_expression(value);
                 }
             }
-            find_idents_in_block(&range_stmt.body, scope);
+            find_idents_in_block(&range_stmt.body, &mut *scope);
         }
         Statement::Label(labeled_stmt) => {
             // a labeled statement does not need a new scope unless it's an if or for statement or something in which case a new scope will be made for that statement specificly.
@@ -141,9 +145,9 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
             }
         }
         Statement::Switch(SwitchStmt::Expr(switch)) => {
-            let scope = scope.add_sub_scope(Scope::default());
+            let mut scope = scope.add_sub_scope(Scope::default());
             if let Some(init) = switch.init.as_deref() {
-                find_idents_in_statement(init, scope);
+                find_idents_in_statement(init, &mut *scope);
             }
             if let Some(tag) = &switch.tag {
                 scope.add_sub_scopes(find_idents_in_expression(tag));
@@ -160,13 +164,13 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
             }
         }
         Statement::Switch(SwitchStmt::Type(switch)) => {
-            let scope = scope.add_sub_scope(Scope::default());
+            let mut scope = scope.add_sub_scope(Scope::default());
             if let Some(init) = switch.init.as_deref() {
-                find_idents_in_statement(init, scope);
+                find_idents_in_statement(init, &mut *scope);
             }
             if let Some(tag) = switch.tag.as_deref() {
                 // TODO This should probably be analysed properly to put a possible tag variable into each clause scope as outlined by the Go Language specification however this is good enough for now.
-                find_idents_in_statement(tag, scope);
+                find_idents_in_statement(tag, &mut *scope);
             }
             for clause in &switch.block.body {
                 for typ in &clause.list {
@@ -181,14 +185,14 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
         }
         Statement::Select(select_stmt) => {
             for clause in &select_stmt.body.body {
-                let scope = scope.add_sub_scope(Scope::default());
+                let mut scope = scope.add_sub_scope(Scope::default());
                 // TODO Look if we need to analyse the comm expression to create sub scopes in the main scope or the clause scope.
                 // This should be good for now and is how I believe it should behave.
                 if let Some(comm) = clause.comm.as_deref() {
-                    find_idents_in_statement(comm, scope);
+                    find_idents_in_statement(comm, &mut *scope);
                 }
                 for stmt in &clause.body {
-                    find_idents_in_statement(stmt, scope);
+                    find_idents_in_statement(stmt, &mut *scope);
                 }
             }
         }
@@ -200,7 +204,7 @@ fn find_idents_in_statement(statement: &Statement, scope: &mut Scope) {
         Statement::ShortVarDecl(short_var_decl) => {
             for name in &short_var_decl.name {
                 // TODO, analyse the types of the values instead of defaulting to unknown.
-                scope.add_variable(name.name.clone(), GoType::Unknown);
+                scope.set_variable(name.name.clone(), GoType::Unknown);
             }
             for value in &short_var_decl.values {
                 scope.add_sub_scopes(find_idents_in_expression(value));
@@ -222,7 +226,7 @@ fn add_variable_decl_to_scope(decl: &crate::ast::Decl<crate::ast::VarSpec>, scop
         };
 
         for name in &variables.name {
-            scope.add_variable(name.name.clone(), GoType::Unknown);
+            scope.set_variable(name.name.clone(), GoType::Unknown);
         }
 
         for value in &variables.values {
@@ -424,21 +428,21 @@ fn get_scope_for_function_type(func_type: &FuncType) -> Scope {
         scope.add_sub_scopes(find_scopes_in_type(&param.typ));
         let typ = GoType::Declared(param.typ.clone());
         for name in &param.identifiers {
-            scope.add_variable(name.name.clone(), typ.clone());
+            scope.set_variable(name.name.clone(), typ.clone());
         }
     }
 
     for param in &func_type.params {
         let typ = GoType::Declared(param.typ.clone());
         for name in &param.identifiers {
-            scope.add_variable(name.name.clone(), typ.clone());
+            scope.set_variable(name.name.clone(), typ.clone());
         }
     }
 
     for param in &func_type.result {
         let typ = GoType::Declared(param.typ.clone());
         for name in &param.identifiers {
-            scope.add_variable(name.name.clone(), typ.clone());
+            scope.set_variable(name.name.clone(), typ.clone());
         }
     }
 
@@ -461,22 +465,12 @@ pub struct Scope {
     /// function arguments or variables declared in this scope
     pub variables: HashMap<String, GoType>,
     /// Functions declared in this scope with their own arguments and local variables
-    sub_scopes: Vec<Scope>,
+    // TODO Try remove this
+    // We had it as just a normal field but eventually this didn't work with the Context struct.
+    sub_scopes: Vec<Rc<RefCell<Scope>>>,
 }
 
 impl Scope {
-    pub fn new(
-        types: HashMap<String, GoType>,
-        variables: HashMap<String, GoType>,
-        sub_scopes: Vec<Scope>,
-    ) -> Self {
-        Self {
-            types,
-            variables,
-            sub_scopes,
-        }
-    }
-
     pub fn new_universe() -> Self {
         Self {
             types: [
@@ -528,7 +522,7 @@ impl Scope {
         }
     }
 
-    pub fn add_variable(&mut self, name: String, typ: GoType) {
+    pub fn set_variable(&mut self, name: String, typ: GoType) {
         self.variables.insert(name, typ);
     }
 
@@ -544,87 +538,93 @@ impl Scope {
         self.types.extend(types);
     }
 
-    pub fn add_sub_scope(&mut self, sub_scope: Scope) -> &mut Scope {
-        self.sub_scopes.push_mut(sub_scope)
+    // TODO Make this not take a new scope and just return one
+    pub fn add_sub_scope(&mut self, sub_scope: Scope) -> RefMut<Scope> {
+        let sub_scope = Rc::new(RefCell::new(sub_scope));
+        self.sub_scopes.push_mut(sub_scope.clone()).borrow_mut()
     }
 
     pub fn add_sub_scopes(&mut self, sub_scopes: Vec<Scope>) {
-        self.sub_scopes.extend(sub_scopes);
+        self.sub_scopes.extend(
+            sub_scopes
+                .into_iter()
+                .map(|scope| Rc::new(RefCell::new(scope))),
+        );
     }
 
-    pub fn get_variable(&mut self, name: &str) -> Option<&mut GoType> {
-        self.variables.get_mut(name)
+    // Clones the variable out rather then returning a reference
+    // Probably more efficient then doing any mapping with closures.
+    pub fn get_variable(&self, name: &str) -> Option<GoType> {
+        self.variables.get(name).cloned()
     }
 }
 
-pub struct Context<'a> {
-    pub scope: &'a mut Scope,
+// TODO This needs to be fully refactored.
+// There should be a way to make this work purely with references and not need to rely on interior mutability but I so far haven't figured it out after much trying.
+pub struct Context {
+    scope: Rc<RefCell<Scope>>,
     pos: usize,
-    parent_variables: Vec<&'a HashMap<String, GoType>>,
-    parent_types: Vec<&'a HashMap<String, GoType>>,
+    parents: Vec<Rc<RefCell<Scope>>>,
 }
 
-impl<'a> Context<'a> {
-    pub fn get_variable(&self, name: &str) -> Option<&GoType> {
-        if let Some(variable) = self.scope.variables.get(name) {
-            return Some(variable);
-        };
-        for parent in &self.parent_variables {
-            if let Some(variable) = parent.get(name) {
-                return Some(variable);
+impl Context {
+    pub fn new(scope: Rc<RefCell<Scope>>) -> Self {
+        Self {
+            scope,
+            pos: 0,
+            parents: vec![],
+        }
+    }
+
+    fn get_current_scope_mut(&mut self) -> RefMut<Scope> {
+        self.scope.borrow_mut()
+    }
+
+    fn get_current_scope(&self) -> Ref<Scope> {
+        self.scope.borrow()
+    }
+
+    /// Traverses scopes until it finds the given variable and returns it's type, cloning it to not deal with any references.
+    /// Returns `None` if the variable cannot be found.
+    pub fn get_variable(&self, name: &str) -> Option<GoType> {
+        if let Some(var) = self.get_local_variable(name) {
+            return Some(var);
+        }
+        for scope in &self.parents {
+            if let Some(var) = scope.borrow().get_variable(name) {
+                return Some(var);
             }
         }
         None
     }
 
-    pub fn new(scope: &'a mut Scope) -> Self {
-        Self {
-            scope,
+    /// Returns the next subscope expected by the program.
+    pub fn next_scope(&mut self) -> Option<Self> {
+        let mut parents = self.parents.clone();
+        parents.push(self.scope.clone());
+        let new_context = Self {
+            scope: self.scope.borrow_mut().sub_scopes.get(self.pos)?.clone(),
             pos: 0,
-            parent_variables: vec![],
-            parent_types: vec![],
-        }
+            parents,
+        };
+        self.pos += 1;
+
+        Some(new_context)
     }
 
-    pub fn next_scope(&'a mut self) -> Option<Self> {
-        let Self {
-            scope,
-            pos,
-            parent_variables,
-            parent_types,
-        } = self;
-        let sub_scope = scope.sub_scopes.get_mut(*pos)?;
-        *pos += 1;
-        let mut new_parent_variables = vec![&scope.variables];
-        for variables in parent_variables.iter() {
-            new_parent_variables.push(variables)
-        }
-
-        let mut new_parent_types = vec![&scope.types];
-        for types in parent_types.iter() {
-            new_parent_types.push(types)
-        }
-
-        Some(Self {
-            pos: 0,
-            scope: sub_scope,
-            parent_variables: new_parent_variables,
-            parent_types: new_parent_types,
-        })
+    pub fn set_variable(&mut self, name: String, typ: GoType) {
+        self.get_current_scope_mut().set_variable(name, typ);
     }
-}
 
-impl<'a> std::ops::DerefMut for Context<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.scope
+    /// Returns the type for the given variable if it is found in the current scope otherwise returns `None`.
+    pub fn get_local_variable(&self, name: &str) -> Option<GoType> {
+        self.get_current_scope().get_variable(name)
     }
-}
 
-impl<'a> std::ops::Deref for Context<'a> {
-    type Target = Scope;
-
-    fn deref(&self) -> &Self::Target {
-        &*self.scope
+    /// Sets the type for the given variable in the current scope.
+    pub fn set_local_variable(&mut self, name: &str, typ: GoType) {
+        self.get_current_scope_mut()
+            .set_variable(name.to_string(), typ)
     }
 }
 
@@ -704,268 +704,442 @@ pub mod test {
     fn empty_file_produces_universe_with_one_empty_subscope() {
         let scope = get_scope_for("package main");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].variables.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 0);
     }
 
     #[test]
     fn file_with_one_type_decl() {
         let scope = get_scope_for("package main\ntype id int");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].types.get("id"),
+            scope.sub_scopes[0].borrow().types.get("id"),
             Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.name.as_str()=="int"
         );
-        assert_eq!(scope.sub_scopes[0].variables.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 0);
     }
 
     #[test]
     fn file_with_two_type_decls() {
         let scope = get_scope_for("package main\ntype id int\ntype test string");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 2);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 2);
         assert_matches!(
-            scope.sub_scopes[0].types.get("id"),
+            scope.sub_scopes[0].borrow().types.get("id"),
             Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.name.as_str()=="int"
         );
 
         assert_matches!(
-            scope.sub_scopes[0].types.get("test"),
+            scope.sub_scopes[0].borrow().types.get("test"),
             Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.name.as_str()=="string"
         );
-        assert_eq!(scope.sub_scopes[0].variables.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 0);
     }
 
     #[test]
     fn file_with_one_var_decl() {
         let scope = get_scope_for("package main\nvar id = 10");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
-        assert_matches!(&scope.sub_scopes[0].variables["id"], GoType::Unknown);
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 1);
+        assert_matches!(
+            &scope.sub_scopes[0].borrow().variables["id"],
+            GoType::Unknown
+        );
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 0);
     }
 
     #[test]
     fn file_with_one_const_decl() {
         let scope = get_scope_for("package main\nconst id = 10");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
-        assert_matches!(&scope.sub_scopes[0].variables["id"], GoType::Unknown);
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 1);
+        assert_matches!(
+            &scope.sub_scopes[0].borrow().variables["id"],
+            GoType::Unknown
+        );
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 0);
     }
 
     #[test]
     fn file_with_function_type_decl_with_two_arguments() {
         let scope = get_scope_for("package main\ntype fun func(first, last name) int");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].types.get("fun"),
+            scope.sub_scopes[0].borrow().types.get("fun"),
             Some(GoType::Declared(Type::Function(_)))
         );
 
-        assert_eq!(scope.sub_scopes[0].variables.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
         // the function type has 2 arguments and no names in the return type.
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 2);
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            2
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            0
+        );
     }
 
     #[test]
     fn file_with_function_type_decl_with_named_result() {
         let scope = get_scope_for("package main\ntype fun func(name) (age int)");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].types.get("fun"),
+            scope.sub_scopes[0].borrow().types.get("fun"),
             Some(GoType::Declared(Type::Function(_)))
         );
 
-        assert_eq!(scope.sub_scopes[0].variables.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
         // the function type does not have named arguments but has one named result.
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 1);
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            1
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            0
+        );
     }
 
     #[test]
     fn file_with_function_decl_with_named_arguments_and_named_result() {
         let scope = get_scope_for("package main\nfunc test (first, last name) (age int)");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].variables.get("test"),
+            scope.sub_scopes[0].borrow().variables.get("test"),
             Some(GoType::Function(_))
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
         // 2 named params + 1 named result
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 3);
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            3
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            0
+        );
     }
 
     #[test]
     fn file_with_function_decl_with_type_params() {
         let scope = get_scope_for("package main\nfunc test[a, b any](first a, last b) (int){}");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].variables.get("test"),
+            scope.sub_scopes[0].borrow().variables.get("test"),
             Some(GoType::Function(_))
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 2);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            2
+        );
         assert_matches!(
-            scope.sub_scopes[0].sub_scopes[0].types["a"],
+            scope.sub_scopes[0].borrow().sub_scopes[0].borrow().types["a"],
             GoType::TypeParam(_)
         );
         assert_matches!(
-            scope.sub_scopes[0].sub_scopes[0].types["b"],
+            scope.sub_scopes[0].borrow().sub_scopes[0].borrow().types["b"],
             GoType::TypeParam(_)
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 2);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            2
+        );
         assert_matches!(
-            &scope.sub_scopes[0].sub_scopes[0].variables["first"],
+            &scope.sub_scopes[0].borrow().sub_scopes[0].borrow().variables["first"],
             GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "a"
         );
         assert_matches!(
-            &scope.sub_scopes[0].sub_scopes[0].variables["last"],
+            &scope.sub_scopes[0].borrow().sub_scopes[0].borrow().variables["last"],
             GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "b"
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            0
+        );
     }
 
     #[test]
     fn file_with_function_decl_with_named_receiver() {
         let scope = get_scope_for("package main\nfunc(o *obj) test (){}");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].variables.get("test"),
+            scope.sub_scopes[0].borrow().variables.get("test"),
             Some(GoType::Function(_))
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
         // One named receiver
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 1);
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            1
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            0
+        );
     }
 
     #[test]
     fn file_with_function_decl_with_short_decl_variables() {
         let scope = get_scope_for("package main\nfunc test(){\nhello:=\"world\"}");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].variables.get("test"),
+            scope.sub_scopes[0].borrow().variables.get("test"),
             Some(GoType::Function(_))
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 1);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            1
+        );
         assert_matches!(
-            &scope.sub_scopes[0].sub_scopes[0].variables["hello"],
+            &scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables["hello"],
             GoType::Unknown
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            0
+        );
     }
 
     #[test]
     fn file_with_function_decl_with_var_decl_variables() {
         let scope = get_scope_for("package main\nfunc test(){\nvar hello = \"world\"}");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].variables.get("test"),
+            scope.sub_scopes[0].borrow().variables.get("test"),
             Some(GoType::Function(_))
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 1);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            1
+        );
         assert_matches!(
-            &scope.sub_scopes[0].sub_scopes[0].variables["hello"],
+            &scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables["hello"],
             GoType::Unknown
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            0
+        );
     }
 
     #[test]
     fn file_with_function_decl_with_type_decl() {
         let scope = get_scope_for("package main\nfunc test(){\ntype name string}");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].variables.get("test"),
+            scope.sub_scopes[0].borrow().variables.get("test"),
             Some(GoType::Function(_))
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 1);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            1
+        );
         assert_matches!(
-            &scope.sub_scopes[0].sub_scopes[0].types["name"],
+            &scope.sub_scopes[0].borrow().sub_scopes[0].borrow().types["name"],
             GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "string"
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            0
+        );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            0
+        );
     }
 
     #[test]
     fn file_with_function_decl_with_const_decl() {
         let scope = get_scope_for("package main\nfunc test(){\nconst hello = \"world\"}");
         assert_eq!(scope.sub_scopes.len(), 1);
-        assert_eq!(scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].variables.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().types.len(), 0);
+        assert_eq!(scope.sub_scopes[0].borrow().variables.len(), 1);
         assert_matches!(
-            scope.sub_scopes[0].variables.get("test"),
+            scope.sub_scopes[0].borrow().variables.get("test"),
             Some(GoType::Function(_))
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 1);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            1
+        );
         assert_matches!(
-            &scope.sub_scopes[0].sub_scopes[0].variables["hello"],
+            &scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables["hello"],
             GoType::Unknown
         );
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            0
+        );
     }
 
     #[test]
@@ -973,25 +1147,54 @@ pub mod test {
         let scope = get_scope_for("package main\nfunc test(){\nif true {}}");
         assert_eq!(scope.sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
-
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 1);
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
             0
         );
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
                 .variables
                 .len(),
             0
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            1
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
                 .sub_scopes
                 .len(),
             0
@@ -1003,44 +1206,88 @@ pub mod test {
         let scope = get_scope_for("package main\nfunc test(){\nif ok:=check(); ok {}}");
         assert_eq!(scope.sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
-
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
-
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 1);
-        assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
-            0
-        );
-        assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
-                .variables
-                .len(),
-            1
-        );
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
-                .sub_scopes
-                .len(),
-            1
-        );
-        assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
                 .types
                 .len(),
             0
         );
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
                 .variables
                 .len(),
             0
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            1
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            1
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            1
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
                 .sub_scopes
                 .len(),
             0
@@ -1052,43 +1299,83 @@ pub mod test {
         let scope = get_scope_for("package main\nfunc test(){\nif true {} else {};}");
         assert_eq!(scope.sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
-
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 2);
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
             0
         );
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
                 .variables
                 .len(),
             0
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            2
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
                 .sub_scopes
                 .len(),
             0
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[1].types.len(),
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[1]
+                .borrow()
+                .types
+                .len(),
             0
         );
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[1]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[1]
+                .borrow()
                 .variables
                 .len(),
             0
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[1]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[1]
+                .borrow()
                 .sub_scopes
                 .len(),
             0
@@ -1101,61 +1388,112 @@ pub mod test {
             get_scope_for("package main\nfunc test(){\nif true {} else if false {} else {};}");
         assert_eq!(scope.sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
-
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 3);
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
             0
         );
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
                 .variables
                 .len(),
             0
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            3
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
                 .sub_scopes
                 .len(),
             0
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[1].types.len(),
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[1]
+                .borrow()
+                .types
+                .len(),
             0
         );
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[1]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[1]
+                .borrow()
                 .variables
                 .len(),
             0
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[1]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[1]
+                .borrow()
                 .sub_scopes
                 .len(),
             0
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[2].types.len(),
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[2]
+                .borrow()
+                .types
+                .len(),
             0
         );
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[2]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[2]
+                .borrow()
                 .variables
                 .len(),
             0
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[2]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[2]
+                .borrow()
                 .sub_scopes
                 .len(),
             0
@@ -1167,25 +1505,54 @@ pub mod test {
         let scope = get_scope_for("package main\nfunc test(){\nfor i := range 5 {}}");
         assert_eq!(scope.sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
-
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 1);
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
             0
         );
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            1
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
                 .variables
                 .len(),
             1
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
                 .sub_scopes
                 .len(),
             0
@@ -1197,25 +1564,54 @@ pub mod test {
         let scope = get_scope_for("package main\nfunc test(){\nfor {}}");
         assert_eq!(scope.sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
-
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 1);
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
             0
         );
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
                 .variables
                 .len(),
             0
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            1
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
                 .sub_scopes
                 .len(),
             0
@@ -1227,25 +1623,54 @@ pub mod test {
         let scope = get_scope_for("package main\nfunc test(){\nfor i := 0; i<10; i++ {}}");
         assert_eq!(scope.sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 0);
-
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 1);
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
             0
         );
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            0
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            1
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
                 .variables
                 .len(),
             1
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
                 .sub_scopes
                 .len(),
             0
@@ -1258,30 +1683,59 @@ pub mod test {
             get_scope_for("package main\nfunc test(){\nfun := func(name string) int{return name}}");
         assert_eq!(scope.sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes.len(), 1);
+        assert_eq!(scope.sub_scopes[0].borrow().sub_scopes.len(), 1);
 
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].types.len(), 0);
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].variables.len(), 1);
-
-        assert_eq!(scope.sub_scopes[0].sub_scopes[0].sub_scopes.len(), 1);
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].types.len(),
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
             0
         );
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .variables
+                .len(),
+            1
+        );
+
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes
+                .len(),
+            1
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
+                .types
+                .len(),
+            0
+        );
+        assert_eq!(
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
                 .variables
                 .len(),
             1
         );
 
         assert_matches!(
-            &scope.sub_scopes[0].sub_scopes[0].sub_scopes[0].variables["name"],
+            &scope.sub_scopes[0].borrow().sub_scopes[0].borrow().sub_scopes[0].borrow().variables["name"],
             GoType::Declared(Type::Name(NameType::Ident(name))) if name.name.as_str() == "string"
         );
 
         assert_eq!(
-            scope.sub_scopes[0].sub_scopes[0].sub_scopes[0]
+            scope.sub_scopes[0].borrow().sub_scopes[0]
+                .borrow()
+                .sub_scopes[0]
+                .borrow()
                 .sub_scopes
                 .len(),
             0
@@ -1294,25 +1748,25 @@ pub mod test {
             "package main\nfunc test(){\nswitch x:=true;x{\ncase true:\ncase false:\n}}",
         );
         assert_eq!(scope.sub_scopes.len(), 1);
-        let file_scope = &scope.sub_scopes[0];
+        let file_scope = &scope.sub_scopes[0].borrow();
         assert_eq!(file_scope.sub_scopes.len(), 1);
-        let func_scope = &file_scope.sub_scopes[0];
+        let func_scope = &file_scope.sub_scopes[0].borrow();
         assert_eq!(func_scope.types.len(), 0);
         assert_eq!(func_scope.variables.len(), 0);
 
         assert_eq!(func_scope.sub_scopes.len(), 1);
-        let switch_scope = &func_scope.sub_scopes[0];
+        let switch_scope = &func_scope.sub_scopes[0].borrow();
         assert_eq!(switch_scope.types.len(), 0);
         assert_eq!(switch_scope.variables.len(), 1);
         assert_eq!(switch_scope.sub_scopes.len(), 2);
 
-        assert_eq!(switch_scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(switch_scope.sub_scopes[0].variables.len(), 0);
-        assert_eq!(switch_scope.sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[0].borrow().types.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[0].borrow().variables.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[0].borrow().sub_scopes.len(), 0);
 
-        assert_eq!(switch_scope.sub_scopes[1].types.len(), 0);
-        assert_eq!(switch_scope.sub_scopes[1].variables.len(), 0);
-        assert_eq!(switch_scope.sub_scopes[1].sub_scopes.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[1].borrow().types.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[1].borrow().variables.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[1].borrow().sub_scopes.len(), 0);
     }
 
     #[test]
@@ -1321,24 +1775,24 @@ pub mod test {
             "package main\nfunc test(){\nswitch x:=thing();v:=x.(type){\ncase string:\ncase int:\n}}",
         );
         assert_eq!(scope.sub_scopes.len(), 1);
-        let file_scope = &scope.sub_scopes[0];
+        let file_scope = &scope.sub_scopes[0].borrow();
         assert_eq!(file_scope.sub_scopes.len(), 1);
-        let func_scope = &file_scope.sub_scopes[0];
+        let func_scope = &file_scope.sub_scopes[0].borrow();
         assert_eq!(func_scope.types.len(), 0);
         assert_eq!(func_scope.variables.len(), 0);
 
         assert_eq!(func_scope.sub_scopes.len(), 1);
-        let switch_scope = &func_scope.sub_scopes[0];
+        let switch_scope = &func_scope.sub_scopes[0].borrow();
         assert_eq!(switch_scope.types.len(), 0);
         assert_eq!(switch_scope.variables.len(), 2);
         assert_eq!(switch_scope.sub_scopes.len(), 2);
 
-        assert_eq!(switch_scope.sub_scopes[0].types.len(), 0);
-        assert_eq!(switch_scope.sub_scopes[0].variables.len(), 0);
-        assert_eq!(switch_scope.sub_scopes[0].sub_scopes.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[0].borrow().types.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[0].borrow().variables.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[0].borrow().sub_scopes.len(), 0);
 
-        assert_eq!(switch_scope.sub_scopes[1].types.len(), 0);
-        assert_eq!(switch_scope.sub_scopes[1].variables.len(), 0);
-        assert_eq!(switch_scope.sub_scopes[1].sub_scopes.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[1].borrow().types.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[1].borrow().variables.len(), 0);
+        assert_eq!(switch_scope.sub_scopes[1].borrow().sub_scopes.len(), 0);
     }
 }

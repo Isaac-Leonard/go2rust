@@ -40,6 +40,12 @@ pub struct Ident {
     pub name: String,
 }
 
+impl Ident {
+    pub fn as_str(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
 impl From<gosyn::ast::Ident> for Ident {
     fn from(value: gosyn::ast::Ident) -> Self {
         Self {

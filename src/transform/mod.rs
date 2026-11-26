@@ -46,9 +46,6 @@ fn convert_decl(decl: &Declaration, context: &mut Context) -> Result<String, Str
 fn convert_type_decl(type_d: &Decl<TypeSpec>, context: &mut Context) -> String {
     let mut type_decls = vec![];
     for spec in &type_d.specs {
-        context
-            .types
-            .insert(spec.name.name.clone(), spec.typ.clone().into());
         type_decls.extend(convert_named_type(&spec.name.name, &spec.typ, context));
     }
     type_decls.join("\n")
@@ -247,6 +244,8 @@ pub fn convert_function_signature(
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
     use gosyn::Parser;
 
     use super::convert_ast;
@@ -260,7 +259,8 @@ mod tests {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap();
         let mut scope = Scope::new_universe();
-        let res = convert_ast(file.into(), &mut Context::new(&mut scope)).unwrap();
+        let res =
+            convert_ast(file.into(), &mut Context::new(Rc::new(RefCell::new(scope)))).unwrap();
         assert_eq!(res, rust);
     }
 
