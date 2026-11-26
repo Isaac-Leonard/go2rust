@@ -644,6 +644,8 @@ pub enum GoType {
     TypeParam(TypeElem),
     Type(Type),
     Pointer(Box<GoType>),
+    /// For function returns
+    List(Vec<Type>),
 }
 
 impl GoType {

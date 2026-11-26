@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use gosyn::token::{LitKind, Operator};
 
-use crate::ast::Operation;
+use crate::ast::{Operation, Type};
 use crate::{
     ast::{
         BlockStmt, ConstSpec, Decl, Declaration, Expression, File, FuncDecl, Ident, Statement,
@@ -82,11 +82,19 @@ fn infer_types_for_type_decl(decl: &Decl<crate::ast::TypeSpec>, context: &mut Co
 
 fn infer_types_for_var_decl(decl: &Decl<VarSpec>, context: &mut Context) {
     for spec in &decl.specs {
-        for (name, value) in spec.name.iter().zip(&spec.values) {
-            if context.get_local_variable(&name.name).unwrap().is_unknown() {
-                context
-                    .set_local_variable(name.as_str(), infer_type_for_expression(value, context));
-            };
+        if spec.name.len() == spec.values.len() {
+            for (name, value) in spec.name.iter().zip(&spec.values) {
+                if context.get_local_variable(&name.name).unwrap().is_unknown() {
+                    context.set_local_variable(
+                        name.as_str(),
+                        infer_type_for_expression(value, context),
+                    );
+                };
+            }
+        } else {
+            todo![
+                "Cannot yet infer types for functions with multiple return types or type assertions, got declaration {spec:?}"
+            ]
         }
     }
 }
@@ -94,7 +102,40 @@ fn infer_types_for_var_decl(decl: &Decl<VarSpec>, context: &mut Context) {
 pub fn infer_type_for_expression(expr: &Expression, context: &Context) -> GoType {
     match expr {
         Expression::Star(expr) => infer_type_for_expression(&*expr.right, context),
-        Expression::Call(call) => todo!(),
+        Expression::Call(call) => {
+            let func_type = infer_type_for_expression(&call.func, context);
+            match func_type {
+                GoType::Declared(Type::Function(func_type)) | GoType::Function(func_type) => {
+                    let result = func_type
+                        .result
+                        .iter()
+                        .flat_map(|param| {
+                            let typ = param.typ.clone();
+                            if param.identifiers.len() == 0 {
+                                vec![typ]
+                            } else {
+                                param.identifiers.iter().map(|_| typ.clone()).collect()
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    if result.len() == 0 {
+                        unreachable![
+                            "Attempted to infer type of call to function with no return type"
+                        ]
+                    } else if result.len() == 1 {
+                        GoType::Declared(result[0].clone())
+                    } else {
+                        GoType::List(result)
+                    }
+                }
+                GoType::Unknown => {
+                    return GoType::Unknown;
+                }
+                other => {
+                    unreachable!("Attempted to infer call type of a non-function, got: {other:?}")
+                }
+            }
+        }
         Expression::Index(index) => todo!(),
         Expression::IndexList(index_list) => todo!(),
         Expression::Slice(slice) => todo!(),
@@ -201,7 +242,10 @@ mod test {
 
     use gosyn::Parser;
 
-    use crate::name_resolution::{Context, GoType, find_use_idents};
+    use crate::{
+        ast::{NameType, Type},
+        name_resolution::{Context, GoType, find_use_idents},
+    };
 
     use super::infer_types_for_file;
 
@@ -607,6 +651,16 @@ mod test {
         assert_matches!(
             file_context.get_variable("int"),
             Some(GoType::Pointer(typ)) if typ.is_int()
+        );
+    }
+
+    #[test]
+    fn var_with_value_from_call_of_int_is_infered_as_int() {
+        let mut context = infer_types_for("package main\nfunc getint()int{}\nvar int = getint()");
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(
+            file_context.get_variable("int"),
+            Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str()=="int"
         );
     }
 }
