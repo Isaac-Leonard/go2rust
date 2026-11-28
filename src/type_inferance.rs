@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use gosyn::token::{LitKind, Operator};
 
-use crate::ast::{Operation, Type};
+use crate::ast::{ArrayType, Operation, SliceType, Type};
 use crate::{
     ast::{
         BlockStmt, ConstSpec, Decl, Declaration, Expression, File, FuncDecl, Ident, Statement,
@@ -128,20 +128,34 @@ pub fn infer_type_for_expression(expr: &Expression, context: &Context) -> GoType
                         GoType::List(result)
                     }
                 }
-                GoType::Unknown => {
-                    return GoType::Unknown;
-                }
+                GoType::Unknown => GoType::Unknown,
                 other => {
                     unreachable!("Attempted to infer call type of a non-function, got: {other:?}")
                 }
             }
         }
-        Expression::Index(index) => todo!(),
+        Expression::Index(index) => {
+            let arr_type = infer_type_for_expression(&index.left, context);
+            match arr_type {
+                GoType::Declared(
+                    Type::Array(ArrayType { typ, .. }) | Type::Slice(SliceType { typ }),
+                ) => GoType::Declared(*typ.clone()),
+                _ => GoType::Unknown,
+            }
+        }
         Expression::IndexList(index_list) => todo!(),
         Expression::Slice(slice) => todo!(),
         Expression::Ident(ident) => resolve_type(ident, context),
         Expression::FuncLit(func_lit) => GoType::Function(func_lit.typ.clone()),
-        Expression::Ellipsis(ellipsis) => todo!(),
+        // We ignore the ...s here and in rest expressions so in most cases the types should be the same.
+        // TODO Make a flatten type to specifically represent this
+        Expression::Ellipsis(ellipsis) => {
+            if let Some(elt) = &ellipsis.elt {
+                infer_type_for_expression(elt, context)
+            } else {
+                GoType::Unknown
+            }
+        }
         Expression::Selector(selector) => todo!(),
         Expression::BasicLit(basic_lit) => match basic_lit.kind {
             // Inline resolve_type here because we don't actually have an `Ident`, I suspect this branch is never ran but best to be safe.
@@ -155,10 +169,17 @@ pub fn infer_type_for_expression(expr: &Expression, context: &Context) -> GoType
             LitKind::Imag => GoType::Imag,
             LitKind::Char => GoType::Char,
         },
-        Expression::Range(range_expr) => todo!(),
+        Expression::Range(range_expr) => unreachable!(
+            "Rang expressions should be captured in range statements and should not exist at this point in the program, got: {range_expr:?}"
+        ),
         Expression::Paren(expr) => infer_type_for_expression(&*expr.expr, context),
         Expression::TypeAssert(type_assertion) => todo!(),
-        Expression::CompositeLit(composite_lit) => todo!(),
+        Expression::CompositeLit(composite_lit) => match &*composite_lit.typ {
+            Expression::Type(typ) => GoType::Declared(typ.clone()),
+            _ => unreachable!(
+                "Cannot yet infer types for non fully specified types, got {composite_lit:?}"
+            ),
+        },
         Expression::List(expressions) => todo!(),
         Expression::Operation(op) => infer_type_for_operation(op, context),
         Expression::Type(typ) => GoType::Type(typ.clone()),
@@ -240,10 +261,10 @@ fn resolve_type(ident: &Ident, context: &Context) -> GoType {
 mod test {
     use std::{assert_matches, cell::RefCell, rc::Rc};
 
-    use gosyn::Parser;
+    use gosyn::{Parser, token::LitKind};
 
     use crate::{
-        ast::{NameType, Type},
+        ast::{ArrayType, BasicLit, Expression, NameType, SliceType, Type},
         name_resolution::{Context, GoType, find_use_idents},
     };
 
@@ -256,7 +277,7 @@ mod test {
             .inspect_err(|e| eprintln!("{e:?}"))
             .unwrap()
             .into();
-        let mut scope = Rc::new(RefCell::new(find_use_idents(&file)));
+        let scope = Rc::new(RefCell::new(find_use_idents(&file)));
         infer_types_for_file(&file, scope.clone());
         Context::new(scope)
     }
@@ -657,6 +678,68 @@ mod test {
     #[test]
     fn var_with_value_from_call_of_int_is_infered_as_int() {
         let mut context = infer_types_for("package main\nfunc getint()int{}\nvar int = getint()");
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(
+            file_context.get_variable("int"),
+            Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str()=="int"
+        );
+    }
+
+    #[test]
+    fn var_with_value_of_int_array_is_infered_as_int_array() {
+        let mut context = infer_types_for("package main\nvar arr=[2]int{4,3}");
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(
+            file_context.get_variable("arr"),
+            Some(GoType::Declared(Type::Array(_)))
+        );
+        let Some(GoType::Declared(Type::Array(ArrayType { len, typ }))) =
+            file_context.get_variable("arr")
+        else {
+            unreachable!("Just used match_assert to check this is true")
+        };
+
+        assert_matches!(
+        *            len,
+                    Expression::BasicLit(BasicLit {
+                        kind: LitKind::Integer,
+                        value,
+                    }) if value.as_str() == "2"
+                );
+
+        assert_matches!(*typ, Type::Name(NameType::Ident(name)) if name.as_str() == "int");
+    }
+
+    #[test]
+    fn var_with_value_of_int_slice_is_infered_as_int_slice() {
+        let mut context = infer_types_for("package main\nvar slice=[]int{4,3}");
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(
+            file_context.get_variable("slice"),
+            Some(GoType::Declared(Type::Slice(_)))
+        );
+        let Some(GoType::Declared(Type::Slice(SliceType { typ }))) =
+            file_context.get_variable("slice")
+        else {
+            unreachable!("Just used match_assert to check this is true")
+        };
+
+        assert_matches!(*typ, Type::Name(NameType::Ident(name)) if name.as_str() == "int");
+    }
+
+    #[test]
+    fn var_with_value_from_index_of_int_array_is_infered_as_int() {
+        let mut context = infer_types_for("package main\nvar arr=[2]int{4,3}\nvar int = arr[0]");
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(
+            file_context.get_variable("int"),
+            Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str()=="int"
+        );
+    }
+
+    #[test]
+    fn var_with_value_from_index_of_int_slice_is_infered_as_int() {
+        let mut context = infer_types_for("package main\nvar slice=[]int{4,3}\nvar int = slice[0]");
         let file_context = context.next_scope().unwrap();
         assert_matches!(
             file_context.get_variable("int"),
