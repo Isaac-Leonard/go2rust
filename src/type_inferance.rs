@@ -2,7 +2,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use gosyn::token::{LitKind, Operator};
 
-use crate::ast::{ArrayType, NameType, Operation, SliceType, Type, TypeSpec};
+use crate::ast::{
+    ArrayType, Field, FieldDecl, NameType, Operation, ParenType, PointerType, SliceType, Type,
+    TypeSpec,
+};
 use crate::{
     ast::{
         BlockStmt, ConstSpec, Decl, Declaration, Expression, File, FuncDecl, Ident, Statement,
@@ -153,7 +156,25 @@ pub fn infer_type_for_expression(expr: &Expression, context: &Context) -> GoType
                 GoType::Unknown
             }
         }
-        Expression::Selector(selector) => todo!(),
+        Expression::Selector(selector) => {
+            let typ = infer_type_for_expression(&selector.x, context);
+            let fields = resolve_struct_fields_for_go_type(typ, context);
+            for field in fields {
+                match field.field {
+                    Field::Named(named_field) => {
+                        for name in named_field.name {
+                            if name == selector.sel {
+                                return GoType::Declared(named_field.typ);
+                            }
+                        }
+                    }
+                    Field::Embedded(embedded_field) => {
+                        todo!("Cannot yet promote embedded struct fields")
+                    }
+                }
+            }
+            GoType::Unknown
+        }
         Expression::BasicLit(basic_lit) => match basic_lit.kind {
             // Inline resolve_type here because we don't actually have an `Ident`, I suspect this branch is never ran but best to be safe.
             LitKind::Ident => context
@@ -183,6 +204,31 @@ pub fn infer_type_for_expression(expr: &Expression, context: &Context) -> GoType
         Expression::List(expressions) => todo!(),
         Expression::Operation(op) => infer_type_for_operation(op, context),
         Expression::Type(typ) => GoType::Type(typ.clone()),
+    }
+}
+
+fn resolve_struct_fields_for_go_type(typ: GoType, context: &Context) -> Vec<FieldDecl> {
+    match typ {
+        GoType::Declared(typ) => resolve_struct_fields_for_type(typ, context),
+        GoType::Pointer(ptr_type) => resolve_struct_fields_for_go_type(*ptr_type, context),
+        _ => unreachable!("Attempted to access field of non struct type, got type: {typ:?}"),
+    }
+}
+
+fn resolve_struct_fields_for_type(typ: Type, context: &Context) -> Vec<FieldDecl> {
+    match typ {
+        Type::Struct(struct_type) => struct_type.fields,
+        Type::Paren(ParenType { typ }) | Type::Pointer(PointerType { typ }) => {
+            resolve_struct_fields_for_type(*typ, context)
+        }
+        Type::Name(NameType::Ident(name)) => {
+            // TODO I think we need to retrieve this from the type being examined scope and not the current program scope.
+            resolve_struct_fields_for_go_type(context.get_type(name.as_str()).unwrap(), context)
+        }
+        Type::Instantiated(instantiated_type) => {
+            todo!("Cannot yet infer types from type arguments")
+        }
+        _ => unreachable!("Attempted to access field of non struct type, got type: {typ:?}"),
     }
 }
 
@@ -765,6 +811,30 @@ mod test {
         assert_matches!(
             file_context.get_type("test"),
             Some(GoType::Declared(Type::Struct(_)))
+        );
+    }
+
+    #[test]
+    fn var_with_value_of_plain_struct_int_field_is_infered_as_int() {
+        let mut context = infer_types_for(
+            "package main\ntype test struct {first int}\nvar test_struct=test {first:5}\nvar int=test_struct.first",
+        );
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(
+            file_context.get_variable("int"),
+            Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str() == "int"
+        );
+    }
+
+    #[test]
+    fn var_with_value_of_pointer_struct_int_field_is_infered_as_int() {
+        let mut context = infer_types_for(
+            "package main\ntype test struct {first int}\nvar test_struct=&test {first:5}\nvar int=test_struct.first",
+        );
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(
+            file_context.get_variable("int"),
+            Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str() == "int"
         );
     }
 }

@@ -35,7 +35,7 @@ impl From<Rc<gosyn::ast::Comment>> for Comment {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Ident {
     pub name: String,
 }
