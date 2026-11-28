@@ -567,6 +567,8 @@ impl Scope {
 
 // TODO This needs to be fully refactored.
 // There should be a way to make this work purely with references and not need to rely on interior mutability but I so far haven't figured it out after much trying.
+// We derive clone here so we can pass a copy of this context to type resolution functions.
+#[derive(Clone)]
 pub struct Context {
     scope: Rc<RefCell<Scope>>,
     pos: usize,
@@ -592,13 +594,20 @@ impl Context {
 
     /// Traverses scopes until it finds the given variable and returns it's type, cloning it to not deal with any references.
     /// Returns `None` if the variable cannot be found.
-    pub fn get_variable(&self, name: &str) -> Option<GoType> {
+    pub fn get_variable(&self, name: &str) -> Option<(GoType, Self)> {
         if let Some(var) = self.get_local_variable(name) {
-            return Some(var);
+            return Some((var, self.clone()));
         }
-        for scope in &self.parents {
+        for (i, scope) in self.parents.iter().enumerate() {
             if let Some(var) = scope.borrow().get_variable(name) {
-                return Some(var);
+                return Some((
+                    var,
+                    Self {
+                        scope: scope.clone(),
+                        parents: self.parents[i + 1..].to_vec(),
+                        pos: 0,
+                    },
+                ));
             }
         }
         None
@@ -643,13 +652,20 @@ impl Context {
         self.get_current_scope_mut().add_type(name.to_string(), typ)
     }
 
-    pub fn get_type(&self, name: &str) -> Option<GoType> {
+    pub fn get_type(&self, name: &str) -> Option<(GoType, Self)> {
         if let Some(var) = self.get_local_type(name) {
-            return Some(var);
+            return Some((var, self.clone()));
         }
-        for scope in &self.parents {
+        for (i, scope) in self.parents.iter().enumerate() {
             if let Some(var) = scope.borrow().get_type(name) {
-                return Some(var);
+                return Some((
+                    var,
+                    Self {
+                        scope: scope.clone(),
+                        parents: self.parents[i + 1..].to_vec(),
+                        pos: 0,
+                    },
+                ));
             }
         }
         None

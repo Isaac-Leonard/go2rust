@@ -179,6 +179,7 @@ pub fn infer_type_for_expression(expr: &Expression, context: &Context) -> GoType
             // Inline resolve_type here because we don't actually have an `Ident`, I suspect this branch is never ran but best to be safe.
             LitKind::Ident => context
                 .get_variable(basic_lit.value.as_str())
+                .map(|t| t.0)
                 .unwrap_or_default(),
 
             LitKind::String => GoType::String,
@@ -222,8 +223,8 @@ fn resolve_struct_fields_for_type(typ: Type, context: &Context) -> Vec<FieldDecl
             resolve_struct_fields_for_type(*typ, context)
         }
         Type::Name(NameType::Ident(name)) => {
-            // TODO I think we need to retrieve this from the type being examined scope and not the current program scope.
-            resolve_struct_fields_for_go_type(context.get_type(name.as_str()).unwrap(), context)
+            let (typ, context) = context.get_type(name.as_str()).unwrap();
+            resolve_struct_fields_for_go_type(typ, &context)
         }
         Type::Instantiated(instantiated_type) => {
             todo!("Cannot yet infer types from type arguments")
@@ -297,9 +298,11 @@ pub fn infer_type_for_operation(op: &Operation, context: &Context) -> GoType {
     }
 }
 
+// TODO Make this return the context of the resolved type for further type resolution when it's needed
 fn resolve_type(ident: &Ident, context: &Context) -> GoType {
     context
         .get_variable(ident.name.as_str())
+        .map(|t| t.0)
         .unwrap_or_default()
 }
 
@@ -335,112 +338,160 @@ mod test {
     fn var_with_value_true_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar is_bool=true");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Bool));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Bool)
+        );
     }
 
     #[test]
     fn var_with_value_false_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar is_bool=false");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Bool));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Bool)
+        );
     }
 
     #[test]
     fn var_with_value_iota_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar is_bool=iota");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_int_value_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar is_int=5");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("is_int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_float_value_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar pi=3.1415");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("pi"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("pi").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_imaginary_value_is_infered_as_imaginary() {
         let mut context = infer_types_for("package main\nvar complex = 5i");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("complex"), Some(GoType::Imag));
+        assert_matches!(
+            file_context.get_variable("complex").map(|t| t.0),
+            Some(GoType::Imag)
+        );
     }
 
     #[test]
     fn var_with_string_value_is_infered_as_string() {
         let mut context = infer_types_for("package main\nvar is_string=\"hello world\"");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_string"), Some(GoType::String));
+        assert_matches!(
+            file_context.get_variable("is_string").map(|t| t.0),
+            Some(GoType::String)
+        );
     }
 
     #[test]
     fn var_with_value_less_than_operation_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar is_bool= a < b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Bool));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Bool)
+        );
     }
 
     #[test]
     fn var_with_value_greater_than_operation_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar is_bool= a > b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Bool));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Bool)
+        );
     }
 
     #[test]
     fn var_with_value_less_than_or_equal_operation_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar is_bool= a <= b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Bool));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Bool)
+        );
     }
 
     #[test]
     fn var_with_value_greater_than_or_equal_operation_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar is_bool= a >= b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Bool));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Bool)
+        );
     }
 
     #[test]
     fn var_with_value_logical_equal_operation_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar is_bool= a == b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Bool));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Bool)
+        );
     }
 
     #[test]
     fn var_with_value_logical_not_equal_operation_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar is_bool= a != b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Bool));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Bool)
+        );
     }
 
     #[test]
     fn var_with_value_logical_and_operation_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar is_bool= a == b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Bool));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Bool)
+        );
     }
 
     #[test]
     fn var_with_value_logical_or_operation_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar is_bool= a || b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Bool));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Bool)
+        );
     }
 
     #[test]
     fn var_with_value_logical_not_operation_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar is_bool= !a");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Bool));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Bool)
+        );
     }
 
     // Only one test here to check that constants are being infered as expected.
@@ -449,259 +500,370 @@ mod test {
     fn const_with_value_true_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nconst is_bool=true");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("is_bool"), Some(GoType::Bool));
+        assert_matches!(
+            file_context.get_variable("is_bool").map(|t| t.0),
+            Some(GoType::Bool)
+        );
     }
 
     #[test]
     fn var_with_value_string_addition_operation_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar str= \"hello\" + \"world\"");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("str"), Some(GoType::String));
+        assert_matches!(
+            file_context.get_variable("str").map(|t| t.0),
+            Some(GoType::String)
+        );
     }
 
     #[test]
     fn var_with_value_string_and_unknown_addition_operation_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar str= \"hello\" + world");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("str"), Some(GoType::String));
+        assert_matches!(
+            file_context.get_variable("str").map(|t| t.0),
+            Some(GoType::String)
+        );
     }
 
     #[test]
     fn var_with_value_unknown_and_string_addition_operation_is_infered_as_bool() {
         let mut context = infer_types_for("package main\nvar str= hello + \"world\"");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("str"), Some(GoType::String));
+        assert_matches!(
+            file_context.get_variable("str").map(|t| t.0),
+            Some(GoType::String)
+        );
     }
 
     #[test]
     fn var_with_value_integer_addition_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= 1 + 2");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_int_and_unknown_addition_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= 2 + unknown");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_unknown_and_integer_addition_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= unknown + 3");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_float_addition_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= 1.0 + 2.0");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_value_float_and_unknown_addition_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= 2.0 + unknown");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_value_unknown_and_float_addition_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= unknown + 3.0");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_value_integer_subtraction_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= 1 - 2");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_int_and_unknown_subtraction_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= 2 - unknown");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_unknown_and_integer_subtraction_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= unknown - 3");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_float_subtraction_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= 1.0 - 2.0");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_value_float_and_unknown_subtraction_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= 2.0 - unknown");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_value_unknown_and_float_subtraction_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= unknown - 3.0");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_value_negative_float_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= -3.0");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_value_negative_int_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= -3");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_notand_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= a&^b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_and_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= a&b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_xor_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= a^b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_or_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= a|b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_rhs_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= a>>b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_lhs_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= a<<b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_rem_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= a%b");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_int_mul_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= 3*2");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_int_and_unknown_mul_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= 3*a");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_unknown_and_int_mul_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= a*3");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_float_mul_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= 3.0*2.0");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_value_float_and_unknown_mul_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= 3.0*a");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_value_unknown_and_float_mul_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= a*3.0");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_value_int_quo_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= 3/2");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_int_and_unknown_quo_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= 3/a");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_unknown_and_int_quo_operation_is_infered_as_int() {
         let mut context = infer_types_for("package main\nvar int= a/3");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("int"), Some(GoType::Int));
+        assert_matches!(
+            file_context.get_variable("int").map(|t| t.0),
+            Some(GoType::Int)
+        );
     }
 
     #[test]
     fn var_with_value_float_quo_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= 3.0/2.0");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_value_float_and_unknown_quo_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= 3.0/a");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
     fn var_with_value_unknown_and_float_quo_operation_is_infered_as_float() {
         let mut context = infer_types_for("package main\nvar float= a/3.0");
         let file_context = context.next_scope().unwrap();
-        assert_matches!(file_context.get_variable("float"), Some(GoType::Float));
+        assert_matches!(
+            file_context.get_variable("float").map(|t| t.0),
+            Some(GoType::Float)
+        );
     }
 
     #[test]
@@ -709,7 +871,7 @@ mod test {
         let mut context = infer_types_for("package main\nvar int= &3");
         let file_context = context.next_scope().unwrap();
         assert_matches!(
-            file_context.get_variable("int"),
+            file_context.get_variable("int").map(|t|t.0),
             Some(GoType::Pointer(typ)) if typ.is_int()
         );
     }
@@ -719,7 +881,7 @@ mod test {
         let mut context = infer_types_for("package main\nvar intptr= &3\nvar int = *intptr");
         let file_context = context.next_scope().unwrap();
         assert_matches!(
-            file_context.get_variable("int"),
+            file_context.get_variable("int").map(|t|t.0),
             Some(GoType::Pointer(typ)) if typ.is_int()
         );
     }
@@ -729,7 +891,7 @@ mod test {
         let mut context = infer_types_for("package main\nfunc getint()int{}\nvar int = getint()");
         let file_context = context.next_scope().unwrap();
         assert_matches!(
-            file_context.get_variable("int"),
+            file_context.get_variable("int").map(|t|t.0),
             Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str()=="int"
         );
     }
@@ -739,10 +901,10 @@ mod test {
         let mut context = infer_types_for("package main\nvar arr=[2]int{4,3}");
         let file_context = context.next_scope().unwrap();
         assert_matches!(
-            file_context.get_variable("arr"),
+            file_context.get_variable("arr").map(|t| t.0),
             Some(GoType::Declared(Type::Array(_)))
         );
-        let Some(GoType::Declared(Type::Array(ArrayType { len, typ }))) =
+        let Some((GoType::Declared(Type::Array(ArrayType { len, typ })), _)) =
             file_context.get_variable("arr")
         else {
             unreachable!("Just used match_assert to check this is true")
@@ -764,10 +926,10 @@ mod test {
         let mut context = infer_types_for("package main\nvar slice=[]int{4,3}");
         let file_context = context.next_scope().unwrap();
         assert_matches!(
-            file_context.get_variable("slice"),
+            file_context.get_variable("slice").map(|t| t.0),
             Some(GoType::Declared(Type::Slice(_)))
         );
-        let Some(GoType::Declared(Type::Slice(SliceType { typ }))) =
+        let Some((GoType::Declared(Type::Slice(SliceType { typ })), _)) =
             file_context.get_variable("slice")
         else {
             unreachable!("Just used match_assert to check this is true")
@@ -781,7 +943,7 @@ mod test {
         let mut context = infer_types_for("package main\nvar arr=[2]int{4,3}\nvar int = arr[0]");
         let file_context = context.next_scope().unwrap();
         assert_matches!(
-            file_context.get_variable("int"),
+            file_context.get_variable("int").map(|t|t.0),
             Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str()=="int"
         );
     }
@@ -791,7 +953,7 @@ mod test {
         let mut context = infer_types_for("package main\nvar slice=[]int{4,3}\nvar int = slice[0]");
         let file_context = context.next_scope().unwrap();
         assert_matches!(
-            file_context.get_variable("int"),
+            file_context.get_variable("int").map(|t|t.0),
             Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str()=="int"
         );
     }
@@ -803,13 +965,13 @@ mod test {
         );
         let file_context = context.next_scope().unwrap();
         assert_matches!(
-            file_context.get_variable("test_struct"),
+            file_context.get_variable("test_struct").map(|t|t.0),
             Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str() == "test"
         );
         // We just check this, if we're getting the correct shape then it's correct and we don't need to test further.
         // TODO add tests to check types are created properly maybe though we do have the full tests to check they're transformed to rust correctly.
         assert_matches!(
-            file_context.get_type("test"),
+            file_context.get_type("test").map(|t| t.0),
             Some(GoType::Declared(Type::Struct(_)))
         );
     }
@@ -821,7 +983,7 @@ mod test {
         );
         let file_context = context.next_scope().unwrap();
         assert_matches!(
-            file_context.get_variable("int"),
+            file_context.get_variable("int").map(|t|t.0),
             Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str() == "int"
         );
     }
@@ -833,7 +995,7 @@ mod test {
         );
         let file_context = context.next_scope().unwrap();
         assert_matches!(
-            file_context.get_variable("int"),
+            file_context.get_variable("int").map(|t|t.0),
             Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str() == "int"
         );
     }
