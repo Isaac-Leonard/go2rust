@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use gosyn::token::{LitKind, Operator};
 
-use crate::ast::{ArrayType, Operation, SliceType, Type};
+use crate::ast::{ArrayType, NameType, Operation, SliceType, Type, TypeSpec};
 use crate::{
     ast::{
         BlockStmt, ConstSpec, Decl, Declaration, Expression, File, FuncDecl, Ident, Statement,
@@ -17,7 +17,8 @@ pub fn infer_types_for_file(ast: &File, scope: Rc<RefCell<Scope>>) {
     for decl in &ast.decl {
         match decl {
             Declaration::Function(func_decl) => infer_types_for_func_decl(func_decl, &mut context),
-            Declaration::Type(decl) => infer_types_for_type_decl(decl, &mut context),
+            // I don't believe there's anything to actually do here
+            Declaration::Type(decl) => {}
             Declaration::Const(decl) => infer_types_for_const_decl(decl, &mut context),
             Declaration::Variable(decl) => infer_types_for_var_decl(decl, &mut context),
         }
@@ -74,10 +75,6 @@ fn infer_types_in_stmt(stmt: &Statement, context: &mut Context) {
         Statement::ShortVarDecl(short_var_decl) => todo!(),
         Statement::Empty(_) | Statement::Branch(_) => {}
     }
-}
-
-fn infer_types_for_type_decl(decl: &Decl<crate::ast::TypeSpec>, context: &mut Context) {
-    todo!()
 }
 
 fn infer_types_for_var_decl(decl: &Decl<VarSpec>, context: &mut Context) {
@@ -176,6 +173,9 @@ pub fn infer_type_for_expression(expr: &Expression, context: &Context) -> GoType
         Expression::TypeAssert(type_assertion) => todo!(),
         Expression::CompositeLit(composite_lit) => match &*composite_lit.typ {
             Expression::Type(typ) => GoType::Declared(typ.clone()),
+            Expression::Ident(ident) => {
+                GoType::Declared(Type::Name(NameType::Ident(ident.clone())))
+            }
             _ => unreachable!(
                 "Cannot yet infer types for non fully specified types, got {composite_lit:?}"
             ),
@@ -264,7 +264,10 @@ mod test {
     use gosyn::{Parser, token::LitKind};
 
     use crate::{
-        ast::{ArrayType, BasicLit, Expression, NameType, SliceType, Type},
+        ast::{
+            ArrayType, BasicLit, Expression, Field, NameType, NamedField, SliceType, StructType,
+            Type,
+        },
         name_resolution::{Context, GoType, find_use_idents},
     };
 
@@ -744,6 +747,24 @@ mod test {
         assert_matches!(
             file_context.get_variable("int"),
             Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str()=="int"
+        );
+    }
+
+    #[test]
+    fn var_with_value_of_struct_is_infered_as_that_struct() {
+        let mut context = infer_types_for(
+            "package main\ntype test struct {first int}\nvar test_struct=test {first:5}",
+        );
+        let file_context = context.next_scope().unwrap();
+        assert_matches!(
+            file_context.get_variable("test_struct"),
+            Some(GoType::Declared(Type::Name(NameType::Ident(name)))) if name.as_str() == "test"
+        );
+        // We just check this, if we're getting the correct shape then it's correct and we don't need to test further.
+        // TODO add tests to check types are created properly maybe though we do have the full tests to check they're transformed to rust correctly.
+        assert_matches!(
+            file_context.get_type("test"),
+            Some(GoType::Declared(Type::Struct(_)))
         );
     }
 }

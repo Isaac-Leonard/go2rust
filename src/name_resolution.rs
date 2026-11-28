@@ -557,6 +557,12 @@ impl Scope {
     pub fn get_variable(&self, name: &str) -> Option<GoType> {
         self.variables.get(name).cloned()
     }
+
+    // Clones the variable out rather then returning a reference
+    // Probably more efficient then doing any mapping with closures.
+    pub fn get_type(&self, name: &str) -> Option<GoType> {
+        self.types.get(name).cloned()
+    }
 }
 
 // TODO This needs to be fully refactored.
@@ -625,6 +631,28 @@ impl Context {
     pub fn set_local_variable(&mut self, name: &str, typ: GoType) {
         self.get_current_scope_mut()
             .set_variable(name.to_string(), typ)
+    }
+
+    /// Returns the type for the given variable if it is found in the current scope otherwise returns `None`.
+    pub fn get_local_type(&self, name: &str) -> Option<GoType> {
+        self.get_current_scope().get_type(name)
+    }
+
+    /// Sets the type for the given variable in the current scope.
+    pub fn set_local_type(&mut self, name: &str, typ: GoType) {
+        self.get_current_scope_mut().add_type(name.to_string(), typ)
+    }
+
+    pub fn get_type(&self, name: &str) -> Option<GoType> {
+        if let Some(var) = self.get_local_type(name) {
+            return Some(var);
+        }
+        for scope in &self.parents {
+            if let Some(var) = scope.borrow().get_type(name) {
+                return Some(var);
+            }
+        }
+        None
     }
 }
 
